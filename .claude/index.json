@@ -1,0 +1,333 @@
+{
+  "project_name": "sanshu",
+  "version": "0.5.0",
+  "scanned_at": "2026-02-18T14:23:45Z",
+  "modules": [
+    {
+      "name": "frontend",
+      "path": "src/frontend",
+      "language": "Vue 3 + TypeScript",
+      "entry": "main.ts",
+      "description": "前端 UI 界面",
+      "key_files": [
+        "App.vue",
+        "main.ts",
+        "vite.config.js",
+        "uno.config.ts"
+      ],
+      "subdirectories": [
+        "components",
+        "composables",
+        "theme",
+        "types",
+        "constants",
+        "utils"
+      ],
+      "has_tests": false,
+      "documentation": "src/frontend/CLAUDE.md"
+    },
+    {
+      "name": "app",
+      "path": "src/rust/app",
+      "language": "Rust",
+      "entry": "main.rs",
+      "description": "Tauri 应用构建与 CLI",
+      "key_files": [
+        "main.rs",
+        "builder.rs",
+        "cli.rs",
+        "setup.rs",
+        "commands.rs"
+      ],
+      "has_tests": false,
+      "documentation": null
+    },
+    {
+      "name": "mcp",
+      "path": "src/rust/mcp",
+      "language": "Rust",
+      "entry": "bin/mcp_server.rs",
+      "description": "MCP 服务器与工具集",
+      "key_files": [
+        "bin/mcp_server.rs",
+        "server.rs",
+        "types.rs",
+        "commands.rs"
+      ],
+      "subdirectories": [
+        "tools/interaction",
+        "tools/memory",
+        "tools/acemcp",
+        "tools/enhance",
+        "tools/context7",
+        "tools/icon",
+        "tools/uiux",
+        "tools/skills"
+      ],
+      "has_tests": true,
+      "documentation": "src/rust/mcp/CLAUDE.md"
+    },
+    {
+      "name": "mcp/tools/interaction",
+      "path": "src/rust/mcp/tools/interaction",
+      "language": "Rust",
+      "entry": "mod.rs",
+      "description": "智能代码审查交互 (zhi)",
+      "key_files": [
+        "mcp.rs",
+        "zhi_history.rs",
+        "commands.rs"
+      ],
+      "has_tests": false,
+      "documentation": null
+    },
+    {
+      "name": "mcp/tools/memory",
+      "path": "src/rust/mcp/tools/memory",
+      "language": "Rust",
+      "entry": "mod.rs",
+      "description": "全局记忆管理 (ji)",
+      "key_files": [
+        "manager.rs",
+        "similarity.rs",
+        "dedup.rs",
+        "migration.rs",
+        "mcp.rs"
+      ],
+      "has_tests": true,
+      "test_files": [
+        "similarity.rs",
+        "dedup.rs",
+        "migration.rs"
+      ],
+      "documentation": null
+    },
+    {
+      "name": "mcp/tools/acemcp",
+      "path": "src/rust/mcp/tools/acemcp",
+      "language": "Rust",
+      "entry": "mod.rs",
+      "description": "代码库索引与搜索 (sou)",
+      "key_files": [
+        "mcp.rs",
+        "watcher.rs",
+        "commands.rs",
+        "types.rs"
+      ],
+      "has_tests": false,
+      "documentation": null
+    },
+    {
+      "name": "mcp/tools/enhance",
+      "path": "src/rust/mcp/tools/enhance",
+      "language": "Rust",
+      "entry": "mod.rs",
+      "description": "提示词增强 (enhance)",
+      "key_files": [
+        "core.rs",
+        "history.rs",
+        "mcp.rs",
+        "types.rs"
+      ],
+      "has_tests": false,
+      "documentation": null
+    },
+    {
+      "name": "mcp/tools/context7",
+      "path": "src/rust/mcp/tools/context7",
+      "language": "Rust",
+      "entry": "mod.rs",
+      "description": "Context7 文档检索",
+      "key_files": [
+        "mcp.rs",
+        "commands.rs",
+        "types.rs"
+      ],
+      "has_tests": false,
+      "documentation": null
+    },
+    {
+      "name": "mcp/tools/icon",
+      "path": "src/rust/mcp/tools/icon",
+      "language": "Rust",
+      "entry": "mod.rs",
+      "description": "图标工坊 (tu)",
+      "key_files": [
+        "api.rs",
+        "mcp.rs",
+        "commands.rs",
+        "types.rs"
+      ],
+      "has_tests": false,
+      "documentation": null
+    },
+    {
+      "name": "mcp/tools/uiux",
+      "path": "src/rust/mcp/tools/uiux",
+      "language": "Rust",
+      "entry": "mod.rs",
+      "description": "UI/UX 设计检索",
+      "key_files": [
+        "engine.rs",
+        "lexicon.rs",
+        "mcp.rs",
+        "response.rs",
+        "sanitize.rs"
+      ],
+      "has_tests": true,
+      "test_files": [
+        "engine.rs"
+      ],
+      "documentation": null
+    },
+    {
+      "name": "mcp/tools/skills",
+      "path": "src/rust/mcp/tools/skills",
+      "language": "Rust",
+      "entry": "mod.rs",
+      "description": "技能运行时",
+      "key_files": [
+        "mod.rs"
+      ],
+      "has_tests": false,
+      "documentation": null
+    },
+    {
+      "name": "telegram",
+      "path": "src/rust/telegram",
+      "language": "Rust",
+      "entry": "mod.rs",
+      "description": "Telegram Bot 集成",
+      "key_files": [
+        "core.rs",
+        "integration.rs",
+        "markdown.rs",
+        "mcp_handler.rs",
+        "commands.rs"
+      ],
+      "has_tests": true,
+      "test_files": [
+        "markdown.rs"
+      ],
+      "documentation": null
+    },
+    {
+      "name": "network",
+      "path": "src/rust/network",
+      "language": "Rust",
+      "entry": "mod.rs",
+      "description": "网络代理与地理位置",
+      "key_files": [
+        "proxy.rs",
+        "geo.rs",
+        "client.rs",
+        "commands.rs"
+      ],
+      "has_tests": true,
+      "test_files": [
+        "proxy.rs",
+        "geo.rs",
+        "client.rs"
+      ],
+      "documentation": null
+    },
+    {
+      "name": "ui",
+      "path": "src/rust/ui",
+      "language": "Rust",
+      "entry": "mod.rs",
+      "description": "窗口管理与音频",
+      "key_files": [
+        "window.rs",
+        "audio.rs",
+        "audio_assets.rs",
+        "updater.rs",
+        "exit.rs",
+        "window_events.rs",
+        "exit_handler.rs",
+        "font_commands.rs",
+        "commands.rs"
+      ],
+      "has_tests": false,
+      "documentation": null
+    },
+    {
+      "name": "config",
+      "path": "src/rust/config",
+      "language": "Rust",
+      "entry": "mod.rs",
+      "description": "配置管理",
+      "key_files": [
+        "settings.rs",
+        "storage.rs"
+      ],
+      "has_tests": false,
+      "documentation": null
+    }
+  ],
+  "coverage": {
+    "total_modules": 15,
+    "documented_modules": 2,
+    "tested_modules": 4,
+    "estimated_file_count": 250,
+    "scanned_file_count": 165,
+    "coverage_percentage": 66
+  },
+  "gaps": {
+    "missing_documentation": [
+      "src/rust/app",
+      "src/rust/mcp/tools/interaction",
+      "src/rust/mcp/tools/memory",
+      "src/rust/mcp/tools/acemcp",
+      "src/rust/mcp/tools/enhance",
+      "src/rust/mcp/tools/context7",
+      "src/rust/mcp/tools/icon",
+      "src/rust/mcp/tools/uiux",
+      "src/rust/mcp/tools/skills",
+      "src/rust/telegram",
+      "src/rust/network",
+      "src/rust/ui",
+      "src/rust/config"
+    ],
+    "missing_tests": [
+      "src/frontend",
+      "src/rust/app",
+      "src/rust/mcp/tools/interaction",
+      "src/rust/mcp/tools/acemcp",
+      "src/rust/mcp/tools/enhance",
+      "src/rust/mcp/tools/context7",
+      "src/rust/mcp/tools/icon",
+      "src/rust/mcp/tools/skills",
+      "src/rust/ui",
+      "src/rust/config"
+    ]
+  },
+  "next_steps": [
+    "为缺失文档的模块生成 CLAUDE.md",
+    "补充前端单元测试",
+    "补充 MCP 工具集成测试",
+    "完善 API 文档和使用示例"
+  ],
+  "ignored_patterns": [
+    "node_modules/**",
+    ".git/**",
+    ".github/**",
+    "dist/**",
+    "build/**",
+    ".next/**",
+    "__pycache__/**",
+    "target/**",
+    "*.lock",
+    "*.log",
+    "*.bin",
+    "*.pdf",
+    "*.png",
+    "*.jpg",
+    "*.jpeg",
+    "*.gif",
+    "*.mp4",
+    "*.zip",
+    "*.tar",
+    "*.gz"
+  ]
+}
