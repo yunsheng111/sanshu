@@ -327,4 +327,219 @@ mod tests {
         let results = index.search("anything", 5);
         assert!(results.is_empty());
     }
+
+    // ─── 边界条件测试 ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_tokenize_empty_string() {
+        // Arrange - 空字符串
+        let text = "";
+
+        // Act
+        let tokens = tokenize(text);
+
+        // Assert - 空字符串应返回空 token 列表，不 panic
+        assert!(tokens.is_empty());
+    }
+
+    #[test]
+    fn test_tokenize_only_punctuation() {
+        // Arrange - 全标点符号，无有效 token
+        let text = "!@#$%^&*().,;:";
+
+        // Act
+        let tokens = tokenize(text);
+
+        // Assert - 全标点应返回空列表
+        assert!(tokens.is_empty());
+    }
+
+    #[test]
+    fn test_tokenize_single_char_filtered() {
+        // Arrange - 单字符 token 应被过滤（长度 < 2）
+        let text = "a b c hello";
+
+        // Act
+        let tokens = tokenize(text);
+
+        // Assert - 单字符 a/b/c 被过滤，只保留 hello
+        assert!(!tokens.contains(&"a".to_string()));
+        assert!(!tokens.contains(&"b".to_string()));
+        assert!(!tokens.contains(&"c".to_string()));
+        assert!(tokens.contains(&"hello".to_string()));
+    }
+
+    #[test]
+    fn test_bm25_single_document() {
+        // Arrange - 单文档集合
+        let docs = vec![(
+            "only.rs".to_string(),
+            "fn authenticate user login".to_string(),
+        )];
+        let index = Bm25Index::build(&docs);
+
+        // Act
+        let results = index.search("user login", 5);
+
+        // Assert - 单文档且包含查询词，应有结果
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].0, "only.rs");
+        assert!(results[0].1 > 0.0, "BM25 分数应为正数");
+    }
+
+    #[test]
+    fn test_bm25_query_empty_string() {
+        // Arrange - 空查询字符串（tokenize 后为空）
+        let docs = make_docs();
+        let index = Bm25Index::build(&docs);
+
+        // Act
+        let results = index.search("", 5);
+
+        // Assert - 空查询应返回空结果，不 panic
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_bm25_no_matching_term() {
+        // Arrange - 查询词在所有文档中均不存在
+        let docs = make_docs();
+        let index = Bm25Index::build(&docs);
+
+        // Act
+        let results = index.search("xyznonexistentterm", 5);
+
+        // Assert - 无匹配词应返回空结果
+        assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_bm25_top_k_truncation() {
+        // Arrange - top_k 小于文档数
+        let docs = make_docs(); // 3 个文档
+        let index = Bm25Index::build(&docs);
+
+        // Act - 只取 1 个结果
+        let results = index.search("fn", 1);
+
+        // Assert - 结果数不超过 top_k
+        assert!(results.len() <= 1);
+    }
+
+    // ─── 异常路径测试 ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_rrf_fuse_vector_only() {
+        // Arrange - 只有向量结果，无 BM25 结果
+        use super::super::local_index::SearchResult;
+        let vector = vec![
+            SearchResult { path: "x.rs".to_string(), score: 0.9 },
+            SearchResult { path: "y.rs".to_string(), score: 0.7 },
+        ];
+
+        // Act
+        let fused = rrf_fuse(&[], &vector, 5);
+
+        // Assert
+        assert_eq!(fused.len(), 2);
+        // x.rs 排名更高（rank=0），RRF 分数应更大
+        assert!(fused[0].rrf_score > fused[1].rrf_score);
+        assert_eq!(fused[0].path, "x.rs");
+        // 向量分数应被记录
+        assert!(fused[0].vector_score.is_some());
+        // BM25 分数应为 None
+        assert!(fused[0].bm25_score.is_none());
+    }
+
+    #[test]
+    fn test_rrf_fuse_both_sources_boost_common_doc() {
+        // Arrange - 同一文档同时出现在 BM25 和向量结果中，RRF 分数应叠加
+        use super::super::local_index::SearchResult;
+        let bm25 = vec![
+            ("common.rs".to_string(), 2.0f32),
+            ("bm25_only.rs".to_string(), 1.5f32),
+        ];
+        let vector = vec![
+            SearchResult { path: "common.rs".to_string(), score: 0.95 },
+            SearchResult { path: "vec_only.rs".to_string(), score: 0.8 },
+        ];
+
+        // Act
+        let fused = rrf_fuse(&bm25, &vector, 5);
+
+        // Assert - common.rs 同时出现在两个列表，RRF 分数应最高
+        let common = fused.iter().find(|r| r.path == "common.rs").unwrap();
+        let bm25_only = fused.iter().find(|r| r.path == "bm25_only.rs").unwrap();
+        let vec_only = fused.iter().find(|r| r.path == "vec_only.rs").unwrap();
+
+        assert!(common.rrf_score > bm25_only.rrf_score, "双源文档 RRF 分数应高于单源");
+        assert!(common.rrf_score > vec_only.rrf_score, "双源文档 RRF 分数应高于单源");
+
+        // common.rs 应同时有 bm25_score 和 vector_score
+        assert!(common.bm25_score.is_some());
+        assert!(common.vector_score.is_some());
+    }
+
+    #[test]
+    fn test_rrf_fuse_top_k_limits_output() {
+        // Arrange - 结果数超过 top_k
+        let bm25: Vec<(String, f32)> = (0..10)
+            .map(|i| (format!("file{}.rs", i), 10.0 - i as f32))
+            .collect();
+
+        // Act
+        let fused = rrf_fuse(&bm25, &[], 3);
+
+        // Assert - 输出不超过 top_k
+        assert_eq!(fused.len(), 3);
+    }
+
+    #[test]
+    fn test_search_bm25_only_returns_correct_fields() {
+        // Arrange - 验证 search_bm25_only 返回的字段结构
+        use crate::mcp::tools::acemcp::embedding_client::{EmbeddingClient, EmbeddingProvider};
+        use crate::mcp::tools::acemcp::local_index::LocalIndexManager;
+        use tempfile::TempDir;
+
+        let tmp = TempDir::new().unwrap();
+        let embedding_client = EmbeddingClient::new(
+            EmbeddingProvider::Ollama,
+            "http://localhost:11434".to_string(),
+            "".to_string(),
+            "nomic-embed-text".to_string(),
+        );
+        let manager = LocalIndexManager::new(
+            tmp.path().join("test.idx"),
+            embedding_client,
+            tmp.path().to_path_buf(),
+        );
+        let searcher = HybridSearcher::new(manager);
+        let docs = make_docs();
+
+        // Act
+        let results = searcher.search_bm25_only("user login", &docs, 5);
+
+        // Assert
+        assert!(!results.is_empty());
+        // search_bm25_only 的结果：rrf_score == bm25_score，vector_score 为 None
+        for r in &results {
+            assert!(r.bm25_score.is_some(), "bm25_score 应有值");
+            assert!(r.vector_score.is_none(), "vector_score 应为 None");
+            assert_eq!(r.rrf_score, r.bm25_score.unwrap(), "rrf_score 应等于 bm25_score");
+        }
+    }
+
+    #[test]
+    fn test_rrf_score_formula() {
+        // Arrange - 验证 RRF 公式：rank=0 时 score = 1/(60+1) ≈ 0.01639
+        let bm25 = vec![("a.rs".to_string(), 1.0f32)];
+
+        // Act
+        let fused = rrf_fuse(&bm25, &[], 5);
+
+        // Assert - RRF_K=60, rank=0: 1/(60+0+1) = 1/61
+        let expected = 1.0f32 / 61.0f32;
+        assert!((fused[0].rrf_score - expected).abs() < 0.0001,
+            "RRF 分数应为 1/(K+rank+1) = {}, 实际: {}", expected, fused[0].rrf_score);
+    }
 }
