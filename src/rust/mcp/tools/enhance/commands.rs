@@ -62,7 +62,7 @@ pub async fn enhance_prompt_stream(
     );
 
     // 创建增强器
-    let mut enhancer = PromptEnhancer::from_acemcp_config()
+    let mut enhancer = PromptEnhancer::from_mcp_config()
         .await
         .map_err(|e| format!("初始化增强器失败: {}", e))?;
 
@@ -132,7 +132,7 @@ pub async fn enhance_prompt(
     log_important!(info, "收到同步增强请求: request_id={}, prompt_len={}", request_id, prompt.len());
 
     // 创建增强器
-    let mut enhancer = PromptEnhancer::from_acemcp_config()
+    let mut enhancer = PromptEnhancer::from_mcp_config()
         .await
         .map_err(|e| format!("初始化增强器失败: {}", e))?;
 

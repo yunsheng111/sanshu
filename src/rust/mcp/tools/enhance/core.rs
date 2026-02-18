@@ -1,5 +1,5 @@
 // 提示词增强核心逻辑
-// 调用 Augment chat-stream API 实现流式提示词增强
+// 支持 Augment chat-stream API / Ollama / OpenAI 兼容 / 规则引擎
 
 use std::fs;
 use std::path::PathBuf;
@@ -13,6 +13,7 @@ use futures_util::StreamExt;
 
 use super::types::*;
 use super::history::ChatHistoryManager;
+use super::utils::mask_api_key;
 use crate::mcp::tools::interaction::ZhiHistoryManager;
 use crate::mcp::tools::acemcp::mcp::ProjectsFile;
 use crate::{log_debug, log_important};
@@ -114,15 +115,48 @@ impl PromptEnhancer {
         self
     }
 
-    /// 从 acemcp 配置创建增强器
+    /// 从 acemcp 配置创建增强器（兼容旧路径）
     pub async fn from_acemcp_config() -> Result<Self> {
         use crate::mcp::tools::acemcp::AcemcpTool;
-        
+
         let config = AcemcpTool::get_acemcp_config().await?;
         let base_url = config.base_url
             .ok_or_else(|| anyhow::anyhow!("未配置 Acemcp base_url"))?;
         let token = config.token
             .ok_or_else(|| anyhow::anyhow!("未配置 Acemcp token"))?;
+
+        log_important!(info, "使用 Augment API: url={}, token={}", base_url, mask_api_key(&token));
+        Self::new(&base_url, &token)
+    }
+
+    /// 从 McpConfig 创建增强器（v5 新增，支持三级降级链）
+    pub async fn from_mcp_config() -> Result<Self> {
+        use crate::config::storage::load_standalone_config;
+        use crate::mcp::tools::enhance::provider_factory::build_enhance_client_async;
+
+        let config = load_standalone_config().unwrap_or_default();
+        let mcp_config = config.mcp_config;
+        let chat_client = build_enhance_client_async(&mcp_config).await;
+
+        log_important!(
+            info,
+            "enhance 提供者: {:?}, model={}",
+            chat_client.provider,
+            chat_client.model
+        );
+
+        // 对于 Augment 兼容路径，仍使用原有 PromptEnhancer
+        // 对于新提供者，base_url/token 从 chat_client 中读取
+        let base_url = if chat_client.base_url.is_empty() {
+            "rule_engine".to_string()
+        } else {
+            chat_client.base_url.clone()
+        };
+        let token = chat_client.api_key.clone().unwrap_or_default();
+
+        if !token.is_empty() {
+            log_important!(info, "API Key: {}", mask_api_key(&token));
+        }
 
         Self::new(&base_url, &token)
     }

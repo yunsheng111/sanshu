@@ -150,6 +150,34 @@ pub struct McpConfig {
     pub icon_default_png_size: Option<u32>,
     /// 缓存过期时间（分钟），默认 30
     pub icon_cache_expiry_minutes: Option<u64>,
+
+    // enhance 工具配置（v5 新增，统一 API 接口层）
+    /// enhance 提供者: "ollama" | "openai_compat" | "rule_engine"
+    pub enhance_provider: Option<String>,
+    /// OpenAI 兼容 API 端点（SiliconFlow / Groq 等）
+    pub enhance_base_url: Option<String>,
+    /// API Key（日志中脱敏显示）
+    pub enhance_api_key: Option<String>,
+    /// 模型名称
+    pub enhance_model: Option<String>,
+    /// Ollama 端点（默认 http://localhost:11434）
+    pub enhance_ollama_url: Option<String>,
+    /// Ollama 模型（默认 qwen2.5-coder:7b）
+    pub enhance_ollama_model: Option<String>,
+
+    // sou 本地索引配置（v5 新增）
+    /// 嵌入提供者: "jina" | "siliconflow" | "ollama" 等
+    pub sou_embedding_provider: Option<String>,
+    /// 嵌入 API 端点
+    pub sou_embedding_base_url: Option<String>,
+    /// 嵌入 API Key
+    pub sou_embedding_api_key: Option<String>,
+    /// 嵌入模型名称
+    pub sou_embedding_model: Option<String>,
+    /// sou 模式: "local" | "acemcp"（默认 "acemcp"）
+    pub sou_mode: Option<String>,
+    /// 索引存储路径（默认 .sanshu-index/）
+    pub sou_index_path: Option<String>,
 }
 
 
@@ -342,6 +370,20 @@ pub fn default_mcp_config() -> McpConfig {
         icon_default_format: None,          // 默认 SVG
         icon_default_png_size: None,        // 默认 64px
         icon_cache_expiry_minutes: None,    // 默认 30 分钟
+        // enhance 工具配置默认值
+        enhance_provider: None,
+        enhance_base_url: None,
+        enhance_api_key: None,
+        enhance_model: None,
+        enhance_ollama_url: None,
+        enhance_ollama_model: None,
+        // sou 本地索引配置默认值
+        sou_embedding_provider: None,
+        sou_embedding_base_url: None,
+        sou_embedding_api_key: None,
+        sou_embedding_model: None,
+        sou_mode: None,
+        sou_index_path: None,
     }
 }
 

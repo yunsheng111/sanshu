@@ -75,7 +75,7 @@ impl EnhanceTool {
         log_important!(info, "MCP enhance 工具被调用: prompt_len={}", request.prompt.len());
 
         // 创建增强器
-        let enhancer = match PromptEnhancer::from_acemcp_config().await {
+        let enhancer = match PromptEnhancer::from_mcp_config().await {
             Ok(mut e) => {
                 if let Some(ref path) = request.project_root_path {
                     e = e.with_project_root(path);
