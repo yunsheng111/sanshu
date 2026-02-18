@@ -5,7 +5,7 @@
  */
 import { invoke } from '@tauri-apps/api/core'
 import { useMessage } from 'naive-ui'
-import { onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useAcemcpSync } from '../../composables/useAcemcpSync'
 import { useLogViewer } from '../../composables/useLogViewer'
 import ConfigSection from '../common/ConfigSection.vue'
@@ -49,6 +49,99 @@ const config = ref({
 
 const loadingConfig = ref(false)
 const showProxyModal = ref(false)
+
+// 本地嵌入配置
+const EMBEDDING_DEFAULTS: Record<string, { base_url: string; model: string; label: string }> = {
+  jina: { base_url: 'https://api.jina.ai/v1', model: 'jina-embeddings-v3', label: 'Jina AI' },
+  siliconflow: { base_url: 'https://api.siliconflow.cn/v1', model: 'BAAI/bge-m3', label: 'SiliconFlow' },
+  ollama: { base_url: 'http://localhost:11434', model: 'nomic-embed-text', label: 'Ollama 本地' },
+  cloudflare: { base_url: 'https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/v1', model: '@cf/baai/bge-base-en-v1.5', label: 'Cloudflare AI' },
+  nomic: { base_url: 'https://api-atlas.nomic.ai/v1', model: 'nomic-embed-text-v1.5', label: 'Nomic' },
+  cohere: { base_url: 'https://api.cohere.com/v1', model: 'embed-multilingual-v3.0', label: 'Cohere' },
+}
+
+const embeddingProviderOptions = Object.entries(EMBEDDING_DEFAULTS).map(([value, { label }]) => ({ label, value }))
+
+// 各嵌入提供者协议说明
+const EMBEDDING_PROTOCOL: Record<string, { type: 'info' | 'success' | 'warning'; desc: string }> = {
+  jina: { type: 'info', desc: 'Jina AI 兼容 OpenAI Embeddings 格式（/embeddings）' },
+  siliconflow: { type: 'info', desc: 'SiliconFlow 兼容 OpenAI Embeddings 格式，支持 BGE 等多种模型' },
+  ollama: { type: 'success', desc: 'Ollama 本地嵌入，无需 API Key，数据不出本机' },
+  cloudflare: { type: 'info', desc: 'Cloudflare AI Gateway，兼容 OpenAI Embeddings 格式' },
+  nomic: { type: 'info', desc: 'Nomic Atlas 兼容 OpenAI Embeddings 格式' },
+  cohere: { type: 'warning', desc: 'Cohere 使用原生格式（/embed），与 OpenAI 不兼容' },
+}
+
+const souConfig = ref({
+  mode: 'acemcp',
+  embedding_provider: 'jina',
+  embedding_base_url: '',
+  embedding_api_key: '',
+  embedding_model: '',
+  index_path: '.sanshu-index',
+})
+
+const loadingSouConfig = ref(false)
+const savingSouConfig = ref(false)
+
+const isLocalMode = computed(() => souConfig.value.mode === 'local')
+const isOllamaEmbedding = computed(() => souConfig.value.embedding_provider === 'ollama')
+
+function onEmbeddingProviderChange(val: string) {
+  const defaults = EMBEDDING_DEFAULTS[val]
+  if (!defaults)
+    return
+  const knownUrls = Object.values(EMBEDDING_DEFAULTS).map(d => d.base_url)
+  const knownModels = Object.values(EMBEDDING_DEFAULTS).map(d => d.model)
+  if (!souConfig.value.embedding_base_url || knownUrls.includes(souConfig.value.embedding_base_url))
+    souConfig.value.embedding_base_url = defaults.base_url
+  if (!souConfig.value.embedding_model || knownModels.includes(souConfig.value.embedding_model))
+    souConfig.value.embedding_model = defaults.model
+}
+
+async function loadSouConfig() {
+  loadingSouConfig.value = true
+  try {
+    const res = await invoke('get_sou_config') as any
+    souConfig.value = {
+      mode: res.mode || 'acemcp',
+      embedding_provider: res.embedding_provider || 'jina',
+      embedding_base_url: res.embedding_base_url || '',
+      embedding_api_key: res.embedding_api_key || '',
+      embedding_model: res.embedding_model || '',
+      index_path: res.index_path || '.sanshu-index',
+    }
+  }
+  catch (err) {
+    message.error(`加载嵌入配置失败: ${err}`)
+  }
+  finally {
+    loadingSouConfig.value = false
+  }
+}
+
+async function saveSouConfig() {
+  savingSouConfig.value = true
+  try {
+    await invoke('save_sou_config', {
+      configDto: {
+        mode: souConfig.value.mode,
+        embedding_provider: souConfig.value.embedding_provider,
+        embedding_base_url: souConfig.value.embedding_base_url,
+        embedding_api_key: souConfig.value.embedding_api_key,
+        embedding_model: souConfig.value.embedding_model,
+        index_path: souConfig.value.index_path,
+      },
+    })
+    message.success('嵌入配置已保存')
+  }
+  catch (err) {
+    message.error(`保存失败: ${err}`)
+  }
+  finally {
+    savingSouConfig.value = false
+  }
+}
 const logFilePath = ref('')
 const { open: openLogViewer } = useLogViewer()
 // 调试状态
@@ -474,6 +567,7 @@ onMounted(async () => {
     await Promise.all([
       fetchAutoIndexEnabled(),
       fetchWatchingProjects(),
+      loadSouConfig(),
     ])
   }
 })
@@ -966,6 +1060,116 @@ defineExpose({ saveConfig })
             <n-scrollbar class="project-list-scrollbar">
               <ProjectIndexManager />
             </n-scrollbar>
+          </n-space>
+        </n-scrollbar>
+      </n-tab-pane>
+      <!-- 本地嵌入配置 -->
+      <n-tab-pane name="embedding" tab="本地嵌入">
+        <n-scrollbar class="tab-scrollbar">
+          <n-space vertical size="large" class="tab-content">
+            <!-- 模式选择 -->
+            <ConfigSection title="搜索模式" description="选择代码搜索的后端实现方式">
+              <n-radio-group v-model:value="souConfig.mode" :disabled="loadingSouConfig">
+                <n-space>
+                  <n-radio value="acemcp">
+                    远程 ACE（需要 ACE API）
+                  </n-radio>
+                  <n-radio value="local">
+                    本地嵌入（无需外部服务）
+                  </n-radio>
+                </n-space>
+              </n-radio-group>
+              <div v-if="!isLocalMode" class="mt-3">
+                <n-alert type="info" :bordered="false">
+                  <template #icon>
+                    <div class="i-carbon-information" />
+                  </template>
+                  当前使用远程 ACE 模式，连接配置请在「基础配置」标签页设置。
+                </n-alert>
+              </div>
+            </ConfigSection>
+
+            <!-- 本地嵌入配置（仅 local 模式显示） -->
+            <ConfigSection
+              v-if="isLocalMode"
+              title="嵌入提供者"
+              description="选择用于生成代码向量的嵌入模型服务"
+            >
+              <n-form-item label="嵌入提供者">
+                <n-select
+                  v-model:value="souConfig.embedding_provider"
+                  :options="embeddingProviderOptions"
+                  :disabled="loadingSouConfig"
+                  @update:value="onEmbeddingProviderChange"
+                />
+              </n-form-item>
+
+              <n-alert
+                v-if="EMBEDDING_PROTOCOL[souConfig.embedding_provider]"
+                :type="EMBEDDING_PROTOCOL[souConfig.embedding_provider].type"
+                :bordered="false"
+                class="mb-3"
+              >
+                <template #icon>
+                  <div class="i-carbon-information" />
+                </template>
+                {{ EMBEDDING_PROTOCOL[souConfig.embedding_provider].desc }}
+              </n-alert>
+
+              <n-form-item label="API 端点">
+                <n-input
+                  v-model:value="souConfig.embedding_base_url"
+                  :disabled="loadingSouConfig"
+                  placeholder="https://api.example.com/v1"
+                  clearable
+                />
+              </n-form-item>
+
+              <n-form-item v-if="!isOllamaEmbedding" label="API Key">
+                <n-input
+                  v-model:value="souConfig.embedding_api_key"
+                  :disabled="loadingSouConfig"
+                  type="password"
+                  show-password-on="click"
+                  placeholder="sk-xxx 或对应密钥"
+                  clearable
+                />
+              </n-form-item>
+
+              <n-form-item label="嵌入模型">
+                <n-input
+                  v-model:value="souConfig.embedding_model"
+                  :disabled="loadingSouConfig"
+                  :placeholder="EMBEDDING_DEFAULTS[souConfig.embedding_provider]?.model ?? ''"
+                  clearable
+                />
+              </n-form-item>
+
+              <n-form-item label="索引存储路径">
+                <n-input
+                  v-model:value="souConfig.index_path"
+                  :disabled="loadingSouConfig"
+                  placeholder=".sanshu-index"
+                  clearable
+                />
+                <template #feedback>
+                  <span class="form-feedback">相对于项目根目录，默认 .sanshu-index</span>
+                </template>
+              </n-form-item>
+            </ConfigSection>
+
+            <div class="flex justify-end">
+              <n-button
+                type="primary"
+                :loading="savingSouConfig"
+                @click="saveSouConfig"
+              >
+                <template #icon>
+                  <div class="i-carbon-save" />
+                </template>
+                保存配置
+              </n-button>
+            </div>
           </n-space>
         </n-scrollbar>
       </n-tab-pane>

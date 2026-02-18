@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
  * 提示词增强配置面板
- * 复用 acemcp 配置，仅展示 base_url/token 与历史管理
+ * 支持多供应商：Ollama / OpenAI / Grok / DeepSeek / SiliconFlow / Groq / Gemini / Anthropic / 规则引擎
  */
 import { invoke } from '@tauri-apps/api/core'
 import { useMessage } from 'naive-ui'
@@ -15,48 +15,79 @@ const props = defineProps<{
 
 const message = useMessage()
 
-// 配置状态（复用 acemcp 配置）
+// 配置状态
 const config = ref({
+  provider: 'ollama',
+  ollama_url: 'http://localhost:11434',
+  ollama_model: 'qwen2.5-coder:7b',
   base_url: '',
-  token: '',
-  batch_size: 10,
-  max_lines_per_blob: 800,
-  text_extensions: [] as string[],
-  exclude_patterns: [] as string[],
-  watch_debounce_ms: 180000,
-  // 代理配置
-  proxy_enabled: false,
-  proxy_host: '127.0.0.1',
-  proxy_port: 7890,
-  proxy_type: 'http' as 'http' | 'https' | 'socks5',
-  proxy_username: '',
-  proxy_password: '',
+  api_key: '',
+  model: '',
 })
 
 const loadingConfig = ref(false)
+const savingConfig = ref(false)
+const testingOllama = ref(false)
+const ollamaAvailable = ref<boolean | null>(null)
 const historyCount = ref<number | null>(null)
 const historyLoading = ref(false)
 
 const hasProject = computed(() => !!props.projectRootPath)
 
-async function loadAcemcpConfig() {
+// 供应商默认配置
+const PROVIDER_DEFAULTS: Record<string, { base_url: string; model: string; label: string }> = {
+  ollama: { base_url: 'http://localhost:11434', model: 'qwen2.5-coder:7b', label: 'Ollama 本地' },
+  openai: { base_url: 'https://api.openai.com/v1', model: 'gpt-4o-mini', label: 'OpenAI' },
+  grok: { base_url: 'https://api.x.ai/v1', model: 'grok-3-mini', label: 'Grok (xAI)' },
+  deepseek: { base_url: 'https://api.deepseek.com/v1', model: 'deepseek-chat', label: 'DeepSeek' },
+  siliconflow: { base_url: 'https://api.siliconflow.cn/v1', model: 'Qwen/Qwen2.5-Coder-7B-Instruct', label: 'SiliconFlow' },
+  groq: { base_url: 'https://api.groq.com/openai/v1', model: 'llama-3.3-70b-versatile', label: 'Groq' },
+  gemini: { base_url: 'https://generativelanguage.googleapis.com/v1beta', model: 'gemini-2.0-flash', label: 'Google Gemini' },
+  anthropic: { base_url: 'https://api.anthropic.com/v1', model: 'claude-3-5-haiku-20241022', label: 'Anthropic Claude' },
+  rule_engine: { base_url: '', model: '', label: '规则引擎（无需 API）' },
+}
+
+const providerOptions = Object.entries(PROVIDER_DEFAULTS).map(([value, { label }]) => ({ label, value }))
+
+// 各供应商协议类型说明
+const PROVIDER_PROTOCOL: Record<string, { type: 'info' | 'success' | 'warning'; desc: string }> = {
+  openai: { type: 'info', desc: 'OpenAI 原生格式（/chat/completions）' },
+  grok: { type: 'info', desc: 'Grok (xAI) 兼容 OpenAI 格式，可直接使用 OpenAI SDK' },
+  deepseek: { type: 'info', desc: 'DeepSeek 兼容 OpenAI 格式（/chat/completions）' },
+  siliconflow: { type: 'info', desc: 'SiliconFlow 兼容 OpenAI 格式，支持多种开源模型' },
+  groq: { type: 'info', desc: 'Groq 兼容 OpenAI 格式，推理速度极快' },
+  gemini: { type: 'success', desc: 'Google Gemini 原生格式（generateContent），与 OpenAI 不兼容' },
+  anthropic: { type: 'success', desc: 'Anthropic Claude 原生格式（/messages），与 OpenAI 不兼容' },
+}
+
+const isOllamaProvider = computed(() => config.value.provider === 'ollama')
+const isRuleEngine = computed(() => config.value.provider === 'rule_engine')
+const isCloudProvider = computed(() => !isOllamaProvider.value && !isRuleEngine.value)
+
+function onProviderChange(val: string) {
+  const defaults = PROVIDER_DEFAULTS[val]
+  if (!defaults)
+    return
+  // 自动填充默认值（仅当字段为空或匹配其他供应商默认值时）
+  const knownUrls = Object.values(PROVIDER_DEFAULTS).map(d => d.base_url)
+  const knownModels = Object.values(PROVIDER_DEFAULTS).map(d => d.model)
+  if (!config.value.base_url || knownUrls.includes(config.value.base_url))
+    config.value.base_url = defaults.base_url
+  if (!config.value.model || knownModels.includes(config.value.model))
+    config.value.model = defaults.model
+}
+
+async function loadConfig() {
   loadingConfig.value = true
   try {
-    const res = await invoke('get_acemcp_config') as any
+    const res = await invoke('get_enhance_config') as any
     config.value = {
+      provider: res.provider || 'ollama',
+      ollama_url: res.ollama_url || 'http://localhost:11434',
+      ollama_model: res.ollama_model || 'qwen2.5-coder:7b',
       base_url: res.base_url || '',
-      token: res.token || '',
-      batch_size: res.batch_size,
-      max_lines_per_blob: res.max_lines_per_blob,
-      text_extensions: res.text_extensions || [],
-      exclude_patterns: res.exclude_patterns || [],
-      watch_debounce_ms: res.watch_debounce_ms || 180000,
-      proxy_enabled: res.proxy_enabled || false,
-      proxy_host: res.proxy_host || '127.0.0.1',
-      proxy_port: res.proxy_port || 7890,
-      proxy_type: res.proxy_type || 'http',
-      proxy_username: res.proxy_username || '',
-      proxy_password: res.proxy_password || '',
+      api_key: res.api_key || '',
+      model: res.model || '',
     }
   }
   catch (err) {
@@ -68,33 +99,48 @@ async function loadAcemcpConfig() {
 }
 
 async function saveConfig() {
-  if (!config.value.base_url || !/^https?:\/\//i.test(config.value.base_url)) {
-    message.error('URL无效，需以 http(s):// 开头')
-    return
-  }
-
+  savingConfig.value = true
   try {
-    await invoke('save_acemcp_config', {
-      args: {
-        baseUrl: config.value.base_url,
-        token: config.value.token,
-        batchSize: config.value.batch_size,
-        maxLinesPerBlob: config.value.max_lines_per_blob,
-        textExtensions: config.value.text_extensions,
-        excludePatterns: config.value.exclude_patterns,
-        watchDebounceMs: config.value.watch_debounce_ms,
-        proxyEnabled: config.value.proxy_enabled,
-        proxyHost: config.value.proxy_host,
-        proxyPort: config.value.proxy_port,
-        proxyType: config.value.proxy_type,
-        proxyUsername: config.value.proxy_username,
-        proxyPassword: config.value.proxy_password,
+    await invoke('save_enhance_config', {
+      configDto: {
+        provider: config.value.provider,
+        ollama_url: config.value.ollama_url,
+        ollama_model: config.value.ollama_model,
+        base_url: config.value.base_url,
+        api_key: config.value.api_key,
+        model: config.value.model,
       },
     })
-    message.success('提示词增强配置已保存')
+    message.success('配置已保存')
   }
   catch (err) {
     message.error(`保存失败: ${err}`)
+  }
+  finally {
+    savingConfig.value = false
+  }
+}
+
+async function testOllamaConnection() {
+  testingOllama.value = true
+  ollamaAvailable.value = null
+  try {
+    const response = await fetch(`${config.value.ollama_url}/api/tags`)
+    if (response.ok) {
+      ollamaAvailable.value = true
+      message.success('Ollama 连接成功')
+    }
+    else {
+      ollamaAvailable.value = false
+      message.error('Ollama 响应异常')
+    }
+  }
+  catch {
+    ollamaAvailable.value = false
+    message.error('无法连接到 Ollama，请确认服务已启动')
+  }
+  finally {
+    testingOllama.value = false
   }
 }
 
@@ -103,28 +149,15 @@ async function loadHistoryCount() {
     historyCount.value = null
     return
   }
-
   historyLoading.value = true
   try {
-    // 中文注释：读取提示词增强历史（非 zhi 交互历史）
     const res = await invoke('get_chat_history', {
       projectRootPath: props.projectRootPath,
       count: 20,
     }) as any[]
     historyCount.value = res.length
   }
-  catch (err) {
-    // 错误分类处理，提供更友好的提示
-    const errMsg = String(err)
-    if (errMsg.includes('创建历史管理器失败')) {
-      message.error('增强历史管理器初始化失败，请检查项目路径是否正确')
-    }
-    else if (errMsg.includes('permission') || errMsg.includes('denied')) {
-      message.error('读取增强历史文件权限不足，请检查文件访问权限')
-    }
-    else {
-      message.error(`加载增强历史失败: ${errMsg}`)
-    }
+  catch {
     historyCount.value = null
   }
   finally {
@@ -134,47 +167,34 @@ async function loadHistoryCount() {
 
 async function clearHistory() {
   if (!hasProject.value) {
-    message.warning('未检测到项目路径，无法清空历史')
+    message.warning('未检测到项目路径')
     return
   }
-
   try {
-    // 中文注释：清空提示词增强历史
     await invoke('clear_chat_history', { projectRootPath: props.projectRootPath })
     historyCount.value = 0
     message.success('历史已清空')
   }
   catch (err) {
-    // 错误分类处理，提供更友好的提示
-    const errMsg = String(err)
-    if (errMsg.includes('创建历史管理器失败')) {
-      message.error('增强历史管理器初始化失败，请检查项目路径是否正确')
-    }
-    else if (errMsg.includes('permission') || errMsg.includes('denied')) {
-      message.error('写入增强历史文件权限不足，请检查文件访问权限')
-    }
-    else {
-      message.error(`清空增强历史失败: ${errMsg}`)
-    }
+    message.error(`清空失败: ${err}`)
   }
 }
 
 watch(() => props.active, (active) => {
   if (active) {
-    loadAcemcpConfig()
+    loadConfig()
     loadHistoryCount()
   }
 })
 
 watch(() => props.projectRootPath, () => {
-  if (props.active) {
+  if (props.active)
     loadHistoryCount()
-  }
 })
 
 onMounted(() => {
   if (props.active) {
-    loadAcemcpConfig()
+    loadConfig()
     loadHistoryCount()
   }
 })
@@ -184,48 +204,133 @@ onMounted(() => {
   <div class="enhance-config">
     <n-scrollbar class="config-scrollbar">
       <n-space vertical size="large" class="config-content">
-        <!-- 说明提示 -->
-        <n-alert type="info" :bordered="false" class="intro-alert">
-          <template #icon>
-            <div class="i-carbon-information" />
-          </template>
-          提示词增强与代码搜索共用 acemcp 配置，修改将同步影响两者。
-        </n-alert>
 
-        <!-- 连接设置 -->
-        <ConfigSection title="连接设置" description="配置 Augment API 连接信息（复用 acemcp 配置）">
-          <n-form-item label="API 端点 URL">
+        <!-- 供应商选择 -->
+        <ConfigSection title="供应商选择" description="选择提示词增强使用的 AI 服务">
+          <n-select
+            v-model:value="config.provider"
+            :options="providerOptions"
+            :disabled="loadingConfig"
+            @update:value="onProviderChange"
+          />
+          <div v-if="isRuleEngine" class="mt-3">
+            <n-alert type="warning" :bordered="false">
+              <template #icon>
+                <div class="i-carbon-warning" />
+              </template>
+              规则引擎是兜底方案，增强效果有限。建议优先使用 Ollama 或云端 API。
+            </n-alert>
+          </div>
+        </ConfigSection>
+
+        <!-- Ollama 配置 -->
+        <ConfigSection
+          v-if="isOllamaProvider"
+          title="Ollama 本地配置"
+          description="使用本地 Ollama 服务进行提示词增强"
+        >
+          <n-form-item label="Ollama 端点">
             <n-input
-              v-model:value="config.base_url"
+              v-model:value="config.ollama_url"
               :disabled="loadingConfig"
-              placeholder="https://d9.api.augmentcode.com"
+              placeholder="http://localhost:11434"
+              clearable
+            />
+          </n-form-item>
+
+          <n-form-item label="模型名称">
+            <n-input
+              v-model:value="config.ollama_model"
+              :disabled="loadingConfig"
+              placeholder="qwen2.5-coder:7b"
               clearable
             />
             <template #feedback>
-              <span class="form-feedback">需包含 http(s):// 前缀</span>
+              <span class="form-feedback">推荐：qwen2.5-coder:7b、deepseek-coder:6.7b</span>
             </template>
           </n-form-item>
 
-          <n-form-item label="认证 Token">
+          <div class="flex items-center gap-3 mt-3">
+            <n-button
+              size="small"
+              :loading="testingOllama"
+              @click="testOllamaConnection"
+            >
+              <template #icon>
+                <div class="i-carbon-connection-signal" />
+              </template>
+              测试连接
+            </n-button>
+            <n-tag v-if="ollamaAvailable === true" type="success" size="small" round>
+              连接正常
+            </n-tag>
+            <n-tag v-else-if="ollamaAvailable === false" type="error" size="small" round>
+              连接失败
+            </n-tag>
+          </div>
+        </ConfigSection>
+
+        <!-- 云端 API 配置 -->
+        <ConfigSection
+          v-if="isCloudProvider"
+          :title="`${PROVIDER_DEFAULTS[config.provider]?.label ?? config.provider} 配置`"
+          description="配置 API 端点、密钥和模型"
+        >
+          <!-- 协议类型标注 -->
+          <n-alert
+            :type="PROVIDER_PROTOCOL[config.provider]?.type ?? 'default'"
+            :bordered="false"
+            class="mb-3"
+          >
+            <template #icon>
+              <div class="i-carbon-information" />
+            </template>
+            {{ PROVIDER_PROTOCOL[config.provider]?.desc ?? '使用 OpenAI 兼容格式' }}
+          </n-alert>
+
+          <n-form-item label="API 端点">
             <n-input
-              v-model:value="config.token"
+              v-model:value="config.base_url"
               :disabled="loadingConfig"
-              type="password"
-              show-password-on="click"
-              placeholder="请输入 token"
+              placeholder="https://api.example.com/v1"
               clearable
             />
           </n-form-item>
 
-          <div class="flex justify-end mt-3">
-            <n-button type="primary" size="small" :loading="loadingConfig" @click="saveConfig">
-              <template #icon>
-                <div class="i-carbon-save" />
-              </template>
-              保存配置
-            </n-button>
-          </div>
+          <n-form-item label="API Key">
+            <n-input
+              v-model:value="config.api_key"
+              :disabled="loadingConfig"
+              type="password"
+              show-password-on="click"
+              placeholder="sk-xxx 或对应密钥"
+              clearable
+            />
+          </n-form-item>
+
+          <n-form-item label="模型名称">
+            <n-input
+              v-model:value="config.model"
+              :disabled="loadingConfig"
+              :placeholder="PROVIDER_DEFAULTS[config.provider]?.model ?? ''"
+              clearable
+            />
+          </n-form-item>
         </ConfigSection>
+
+        <!-- 保存按钮 -->
+        <div class="flex justify-end">
+          <n-button
+            type="primary"
+            :loading="savingConfig"
+            @click="saveConfig"
+          >
+            <template #icon>
+              <div class="i-carbon-save" />
+            </template>
+            保存配置
+          </n-button>
+        </div>
 
         <!-- 历史管理 -->
         <ConfigSection title="增强历史管理" description="仅保存文本摘要，不包含图片原始数据">
@@ -274,10 +379,6 @@ onMounted(() => {
 .config-content {
   padding-right: 8px;
   padding-bottom: 16px;
-}
-
-.intro-alert {
-  border-radius: 8px;
 }
 
 .form-feedback {
