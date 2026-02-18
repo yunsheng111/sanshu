@@ -141,4 +141,163 @@ mod tests {
         let result = enhancer.enhance(prompt, &ctx);
         assert_eq!(result, prompt);
     }
+
+    // ─── 边界条件测试 ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_rule_engine_empty_input() {
+        // Arrange - 空字符串输入
+        let enhancer = RuleEnhancer::new_default();
+        let ctx = EnhanceContext::default();
+
+        // Act
+        let result = enhancer.enhance("", &ctx);
+
+        // Assert - 空输入应返回空字符串，不 panic
+        assert_eq!(result, "");
+    }
+
+    #[test]
+    fn test_rule_engine_long_input() {
+        // Arrange - 超长输入（>1000 字符）
+        let enhancer = RuleEnhancer::new_default();
+        let ctx = EnhanceContext::default();
+        let long_prompt = "fix ".repeat(300); // 1200 字符，包含触发词
+
+        // Act
+        let result = enhancer.enhance(&long_prompt, &ctx);
+
+        // Assert - 超长输入应正常处理，不 panic，且触发了 fix 规则
+        assert!(result.len() > long_prompt.len(), "应追加规则模板");
+        assert!(result.contains("错误的完整堆栈"));
+    }
+
+    #[test]
+    fn test_rule_engine_first_match_stops_at_highest_priority() {
+        // Arrange - "fix" 触发 priority=100 的规则，"refactor" 触发 priority=90
+        // FirstMatch 策略下，只应用优先级最高的第一个匹配规则
+        let enhancer = RuleEnhancer::new_default();
+        let ctx = EnhanceContext::default();
+        let prompt = "fix and refactor this code"; // 同时匹配 fix(100) 和 refactor(90)
+
+        // Act
+        let result = enhancer.enhance(prompt, &ctx);
+
+        // Assert - FirstMatch：只追加 fix 规则（priority=100），不追加 refactor 规则
+        assert!(result.contains("错误的完整堆栈"), "应包含 fix 规则内容");
+        assert!(!result.contains("保持现有公共 API 不变"), "不应包含 refactor 规则内容");
+    }
+
+    #[test]
+    fn test_rule_engine_all_match_applies_multiple_rules() {
+        // Arrange - AllMatch 策略应叠加所有匹配规则
+        let enhancer = RuleEnhancer::new_default().with_all_match();
+        let ctx = EnhanceContext::default();
+        let prompt = "fix and refactor this code"; // 同时匹配 fix 和 refactor
+
+        // Act
+        let result = enhancer.enhance(prompt, &ctx);
+
+        // Assert - AllMatch：fix 和 refactor 规则都应被追加
+        assert!(result.contains("错误的完整堆栈"), "应包含 fix 规则内容");
+        assert!(result.contains("保持现有公共 API 不变"), "应包含 refactor 规则内容");
+    }
+
+    #[test]
+    fn test_rule_engine_chinese_keyword_trigger() {
+        // Arrange - 中文关键词触发
+        let enhancer = RuleEnhancer::new_default();
+        let ctx = EnhanceContext::default();
+
+        // Act & Assert - 中文"修复"触发 fix 规则
+        let result = enhancer.enhance("帮我修复这个问题", &ctx);
+        assert!(result.contains("错误的完整堆栈"), "中文'修复'应触发 fix 规则");
+
+        // 中文"数据库"触发 database 规则（避免使用"优化"，因其同时匹配 performance 规则）
+        let result2 = enhancer.enhance("查询数据库 sql 表结构", &ctx);
+        assert!(result2.contains("说明表结构和索引"), "中文'数据库'应触发 database 规则");
+    }
+
+    // ─── 异常路径测试 ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_rule_engine_priority_order_security_beats_deploy() {
+        // Arrange - "auth" 同时匹配 security(90) 和 api(80)
+        // FirstMatch 按优先级降序排列，security(90) 应先匹配
+        let enhancer = RuleEnhancer::new_default();
+        let ctx = EnhanceContext::default();
+        let prompt = "auth endpoint security"; // 匹配 security(90) 和 api(80)
+
+        // Act
+        let result = enhancer.enhance(prompt, &ctx);
+
+        // Assert - security 规则优先级 90 > api 规则优先级 80
+        assert!(result.contains("不在日志中输出敏感信息"), "security 规则应优先触发");
+        assert!(!result.contains("遵循 RESTful 规范"), "api 规则不应触发（FirstMatch）");
+    }
+
+    #[test]
+    fn test_rule_engine_result_starts_with_original_prompt() {
+        // Arrange - 增强结果必须以原始 prompt 开头
+        let enhancer = RuleEnhancer::new_default();
+        let ctx = EnhanceContext::default();
+        let prompt = "帮我写一个 test 用例";
+
+        // Act
+        let result = enhancer.enhance(prompt, &ctx);
+
+        // Assert - 原始 prompt 必须保留在结果开头
+        assert!(result.starts_with(prompt), "增强结果必须以原始 prompt 开头");
+        assert!(result.len() > prompt.len(), "应追加了规则模板");
+    }
+
+    #[test]
+    fn test_rule_engine_with_context_fields() {
+        // Arrange - 提供完整的 EnhanceContext（当前实现忽略 context，但不应 panic）
+        let enhancer = RuleEnhancer::new_default();
+        let ctx = EnhanceContext {
+            current_file: Some("src/main.rs".to_string()),
+            project_root: Some("/home/user/project".to_string()),
+        };
+
+        // Act
+        let result = enhancer.enhance("fix this bug", &ctx);
+
+        // Assert - 有 context 时应正常工作
+        assert!(result.contains("错误的完整堆栈"));
+    }
+
+    #[test]
+    fn test_rule_engine_default_has_10_rules() {
+        // Arrange & Act
+        let enhancer = RuleEnhancer::new_default();
+
+        // Assert - 默认应有 10 条规则（通过触发不同关键词验证）
+        // 验证规则数量通过覆盖所有规则类型
+        let ctx = EnhanceContext::default();
+        let test_cases = vec![
+            ("fix bug", "错误的完整堆栈"),
+            ("refactor code", "保持现有公共 API 不变"),
+            ("write test", "覆盖正常路径"),
+            ("update doc", "使用简体中文"),
+            ("api endpoint", "遵循 RESTful 规范"),
+            ("performance slow", "先测量再优化"),
+            ("security auth", "不在日志中输出敏感信息"),
+            ("deploy pipeline", "说明目标环境"),
+            ("database query", "说明表结构和索引"),
+            ("ui component", "说明目标设备和分辨率"),
+        ];
+
+        // 使用 AllMatch 策略逐一验证每条规则可触发
+        let all_match_enhancer = RuleEnhancer::new_default().with_all_match();
+        for (prompt, expected_content) in test_cases {
+            let result = all_match_enhancer.enhance(prompt, &ctx);
+            assert!(
+                result.contains(expected_content),
+                "规则触发失败：prompt='{}' 应包含 '{}'",
+                prompt,
+                expected_content
+            );
+        }
+    }
 }

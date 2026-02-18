@@ -11,7 +11,9 @@ use serde_json::json;
 #[derive(Debug, Clone, PartialEq)]
 pub enum ChatProvider {
     Ollama,
-    OpenAICompat,  // SiliconFlow / Groq / Gemini / Cloudflare 等
+    OpenAICompat,  // OpenAI / Grok(xAI) / DeepSeek / SiliconFlow / Groq / Cloudflare 等
+    Gemini,        // Google Gemini 原生格式
+    Anthropic,     // Anthropic Claude 原生格式
     RuleEngine,    // 无 API 时的纯规则降级
 }
 
@@ -54,7 +56,7 @@ impl ChatClient {
     ) -> Self {
         let (connect_ms, request_ms, stream_ms) = match provider {
             ChatProvider::Ollama => (3_000, 60_000, 300_000),
-            ChatProvider::OpenAICompat => (10_000, 30_000, 120_000),
+            ChatProvider::OpenAICompat | ChatProvider::Gemini | ChatProvider::Anthropic => (10_000, 30_000, 120_000),
             ChatProvider::RuleEngine => (0, 0, 0),
         };
         Self {
@@ -90,6 +92,8 @@ impl ChatClient {
             }
             ChatProvider::Ollama => self.chat_ollama(messages).await,
             ChatProvider::OpenAICompat => self.chat_openai_compat(messages).await,
+            ChatProvider::Gemini => self.chat_gemini(messages).await,
+            ChatProvider::Anthropic => self.chat_anthropic(messages).await,
         }
     }
 
@@ -145,6 +149,102 @@ impl ChatClient {
         Ok(content)
     }
 
+    async fn chat_gemini(&self, messages: &[Message]) -> Result<String> {
+        let client = self.build_client(false)?;
+        let base = self.base_url.trim_end_matches('/');
+        let url = format!("{}/models/{}:generateContent", base, self.model);
+
+        // 将 system 消息合并为第一条 user 消息的前缀
+        let mut system_text = String::new();
+        let mut user_messages: Vec<serde_json::Value> = Vec::new();
+        for msg in messages {
+            if msg.role == "system" {
+                system_text.push_str(&msg.content);
+                system_text.push('\n');
+            } else {
+                let role = if msg.role == "assistant" { "model" } else { "user" };
+                user_messages.push(json!({
+                    "role": role,
+                    "parts": [{"text": msg.content}]
+                }));
+            }
+        }
+        // 将 system 前缀注入第一条 user 消息
+        if !system_text.is_empty() {
+            if let Some(first) = user_messages.first_mut() {
+                let orig = first["parts"][0]["text"].as_str().unwrap_or("").to_string();
+                first["parts"][0]["text"] = json!(format!("{}{}", system_text, orig));
+            } else {
+                user_messages.push(json!({
+                    "role": "user",
+                    "parts": [{"text": system_text.trim()}]
+                }));
+            }
+        }
+
+        let payload = json!({ "contents": user_messages });
+        let mut req = client.post(&url).header(CONTENT_TYPE, "application/json");
+        if let Some(key) = &self.api_key {
+            req = req.header("x-goog-api-key", key.as_str());
+        }
+        let resp = req.json(&payload).send().await?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            return Err(anyhow::anyhow!("Gemini HTTP {} - {}", status, body));
+        }
+        let json: serde_json::Value = resp.json().await?;
+        let content = json["candidates"][0]["content"]["parts"][0]["text"]
+            .as_str()
+            .unwrap_or("")
+            .to_string();
+        Ok(content)
+    }
+
+    async fn chat_anthropic(&self, messages: &[Message]) -> Result<String> {
+        let client = self.build_client(false)?;
+        let url = format!("{}/messages", self.base_url.trim_end_matches('/'));
+
+        // 提取 system 消息
+        let system_text: String = messages.iter()
+            .filter(|m| m.role == "system")
+            .map(|m| m.content.as_str())
+            .collect::<Vec<_>>()
+            .join("\n");
+        let non_system: Vec<serde_json::Value> = messages.iter()
+            .filter(|m| m.role != "system")
+            .map(|m| json!({"role": m.role, "content": m.content}))
+            .collect();
+
+        let mut payload = json!({
+            "model": self.model,
+            "max_tokens": 4096,
+            "messages": non_system
+        });
+        if !system_text.is_empty() {
+            payload["system"] = json!(system_text);
+        }
+
+        let mut req = client.post(&url)
+            .header(CONTENT_TYPE, "application/json")
+            .header("anthropic-version", "2023-06-01");
+        if let Some(key) = &self.api_key {
+            req = req.header("x-api-key", key.as_str());
+        }
+        let resp = req.json(&payload).send().await?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            return Err(anyhow::anyhow!("Anthropic HTTP {} - {}", status, body));
+        }
+        let json: serde_json::Value = resp.json().await?;
+        let content = json["content"][0]["text"]
+            .as_str()
+            .unwrap_or("")
+            .to_string();
+        Ok(content)
+    }
+
     /// 带简单重试的 chat（最多 2 次）
     pub async fn chat_with_retry(&self, messages: &[Message]) -> Result<String> {
         let mut last_err = None;
@@ -164,6 +264,7 @@ impl ChatClient {
 
     /// 检测服务是否可用（超时 3s）
     pub async fn is_available(&self) -> bool {
+
         if self.provider == ChatProvider::RuleEngine {
             return true;
         }
@@ -177,10 +278,252 @@ impl ChatClient {
         };
         let health_url = match self.provider {
             ChatProvider::Ollama => format!("{}/api/tags", self.base_url.trim_end_matches('/')),
+            ChatProvider::Gemini | ChatProvider::Anthropic => {
+                // Gemini/Anthropic 不提供简单健康检查端点，直接视为可用
+                return true;
+            }
             _ => format!("{}/models", self.base_url.trim_end_matches('/')),
         };
         client.get(&health_url).send().await
             .map(|r| r.status().is_success())
             .unwrap_or(false)
+    }
+}
+
+// ─── 单元测试 ─────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ─── 正常路径测试 ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_message_constructors() {
+        // Arrange & Act
+        let sys = Message::system("你是一个助手");
+        let usr = Message::user("帮我写代码");
+        let ast = Message::assistant("好的");
+
+        // Assert
+        assert_eq!(sys.role, "system");
+        assert_eq!(sys.content, "你是一个助手");
+        assert_eq!(usr.role, "user");
+        assert_eq!(usr.content, "帮我写代码");
+        assert_eq!(ast.role, "assistant");
+        assert_eq!(ast.content, "好的");
+    }
+
+    #[test]
+    fn test_chat_client_ollama_timeouts() {
+        // Arrange & Act
+        let client = ChatClient::new(
+            ChatProvider::Ollama,
+            "http://localhost:11434".to_string(),
+            None,
+            "qwen2.5-coder:7b".to_string(),
+        );
+
+        // Assert - Ollama 超时配置：connect=3s, request=60s, stream=300s
+        assert_eq!(client.connect_timeout_ms, 3_000);
+        assert_eq!(client.request_timeout_ms, 60_000);
+        assert_eq!(client.stream_timeout_ms, 300_000);
+        assert_eq!(client.provider, ChatProvider::Ollama);
+    }
+
+    #[test]
+    fn test_chat_client_openai_compat_timeouts() {
+        // Arrange & Act
+        let client = ChatClient::new(
+            ChatProvider::OpenAICompat,
+            "https://api.siliconflow.cn/v1".to_string(),
+            Some("sk-test".to_string()),
+            "Qwen/Qwen2.5-Coder-7B-Instruct".to_string(),
+        );
+
+        // Assert - OpenAICompat 超时配置：connect=10s, request=30s, stream=120s
+        assert_eq!(client.connect_timeout_ms, 10_000);
+        assert_eq!(client.request_timeout_ms, 30_000);
+        assert_eq!(client.stream_timeout_ms, 120_000);
+        assert_eq!(client.provider, ChatProvider::OpenAICompat);
+    }
+
+    #[test]
+    fn test_chat_client_rule_engine_zero_timeouts() {
+        // Arrange & Act
+        let client = ChatClient::new(
+            ChatProvider::RuleEngine,
+            String::new(),
+            None,
+            String::new(),
+        );
+
+        // Assert - RuleEngine 超时全为 0（不走网络）
+        assert_eq!(client.connect_timeout_ms, 0);
+        assert_eq!(client.request_timeout_ms, 0);
+        assert_eq!(client.stream_timeout_ms, 0);
+        assert_eq!(client.provider, ChatProvider::RuleEngine);
+    }
+
+    #[tokio::test]
+    async fn test_rule_engine_chat_returns_empty_without_network() {
+        // Arrange - RuleEngine 不走网络，直接返回空字符串
+        let client = ChatClient::new(
+            ChatProvider::RuleEngine,
+            String::new(),
+            None,
+            String::new(),
+        );
+        let messages = vec![
+            Message::system("你是助手"),
+            Message::user("帮我优化代码"),
+        ];
+
+        // Act
+        let result = client.chat(&messages).await;
+
+        // Assert - 应成功返回空字符串，不发网络请求
+        assert!(result.is_ok(), "RuleEngine chat 应返回 Ok");
+        assert_eq!(result.unwrap(), "", "RuleEngine chat 应返回空字符串");
+    }
+
+    #[tokio::test]
+    async fn test_rule_engine_chat_with_retry_returns_empty() {
+        // Arrange
+        let client = ChatClient::new(
+            ChatProvider::RuleEngine,
+            String::new(),
+            None,
+            String::new(),
+        );
+        let messages = vec![Message::user("测试重试")];
+
+        // Act
+        let result = client.chat_with_retry(&messages).await;
+
+        // Assert - RuleEngine 不会失败，重试逻辑应直接返回成功
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "");
+    }
+
+    #[tokio::test]
+    async fn test_rule_engine_is_available_always_true() {
+        // Arrange
+        let client = ChatClient::new(
+            ChatProvider::RuleEngine,
+            String::new(),
+            None,
+            String::new(),
+        );
+
+        // Act
+        let available = client.is_available().await;
+
+        // Assert - RuleEngine 始终可用，不走网络
+        assert!(available, "RuleEngine is_available 应始终返回 true");
+    }
+
+    // ─── 边界条件测试 ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_chat_client_with_empty_strings() {
+        // Arrange & Act - 空字符串参数
+        let client = ChatClient::new(
+            ChatProvider::Ollama,
+            "".to_string(),
+            None,
+            "".to_string(),
+        );
+
+        // Assert - 空字符串应被接受，不 panic
+        assert_eq!(client.base_url, "");
+        assert_eq!(client.model, "");
+        assert!(client.api_key.is_none());
+    }
+
+    #[test]
+    fn test_chat_client_with_api_key() {
+        // Arrange & Act
+        let client = ChatClient::new(
+            ChatProvider::OpenAICompat,
+            "https://api.example.com/v1".to_string(),
+            Some("sk-secret-key".to_string()),
+            "gpt-4".to_string(),
+        );
+
+        // Assert
+        assert_eq!(client.api_key, Some("sk-secret-key".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_rule_engine_chat_empty_messages() {
+        // Arrange - 空消息列表
+        let client = ChatClient::new(
+            ChatProvider::RuleEngine,
+            String::new(),
+            None,
+            String::new(),
+        );
+        let messages: Vec<Message> = vec![];
+
+        // Act
+        let result = client.chat(&messages).await;
+
+        // Assert - 空消息列表应正常处理，不 panic
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "");
+    }
+
+    // ─── 异常路径测试 ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn test_provider_equality() {
+        // Arrange & Act & Assert
+        assert_eq!(ChatProvider::Ollama, ChatProvider::Ollama);
+        assert_eq!(ChatProvider::RuleEngine, ChatProvider::RuleEngine);
+        assert_ne!(ChatProvider::Ollama, ChatProvider::RuleEngine);
+        assert_ne!(ChatProvider::OpenAICompat, ChatProvider::RuleEngine);
+    }
+
+    #[test]
+    fn test_provider_clone() {
+        // Arrange
+        let provider = ChatProvider::OpenAICompat;
+
+        // Act
+        let cloned = provider.clone();
+
+        // Assert
+        assert_eq!(provider, cloned);
+    }
+
+    #[test]
+    fn test_message_clone() {
+        // Arrange
+        let msg = Message::user("原始消息");
+
+        // Act
+        let cloned = msg.clone();
+
+        // Assert
+        assert_eq!(cloned.role, msg.role);
+        assert_eq!(cloned.content, msg.content);
+    }
+
+    #[tokio::test]
+    async fn test_ollama_is_available_returns_false_on_unreachable_host() {
+        // Arrange - 使用不可达的地址（端口 1 通常不监听）
+        let client = ChatClient::new(
+            ChatProvider::Ollama,
+            "http://127.0.0.1:1".to_string(),
+            None,
+            "test-model".to_string(),
+        );
+
+        // Act - 连接超时应返回 false，不 panic
+        let available = client.is_available().await;
+
+        // Assert
+        assert!(!available, "不可达主机应返回 false");
     }
 }
