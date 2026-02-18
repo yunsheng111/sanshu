@@ -1,6 +1,12 @@
 use crate::config::AppState;
 use crate::ui::AudioController;
 use crate::app::{setup::setup_application, commands::*};
+use crate::mcp::commands::{
+    get_memory_list, get_memory_stats, get_memory_config, save_memory_config,
+    deduplicate_memories, preview_similarity, delete_memory,
+    get_enhance_config, save_enhance_config,
+    get_sou_config, save_sou_config,
+};
 use crate::log_important;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
@@ -188,7 +194,15 @@ pub fn build_tauri_app() -> Builder<tauri::Wry> {
             save_memory_config,
             deduplicate_memories,
             preview_similarity,
-            delete_memory
+            delete_memory,
+
+            // 提示词增强配置命令
+            get_enhance_config,
+            save_enhance_config,
+
+            // 代码搜索配置命令
+            get_sou_config,
+            save_sou_config
         ])
         .setup(|app| {
             let app_handle = app.handle().clone();

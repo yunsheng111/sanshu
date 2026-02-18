@@ -361,3 +361,124 @@ pub async fn delete_memory(project_path: String, memory_id: String) -> Result<St
     }
 }
 
+// ============ 提示词增强配置命令 ============
+
+/// 提示词增强配置 DTO
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub struct EnhanceConfigDto {
+    /// 当前提供者: "ollama" | "openai_compat" | "rule_engine"
+    pub provider: String,
+    /// Ollama 端点
+    pub ollama_url: String,
+    /// Ollama 模型
+    pub ollama_model: String,
+    /// OpenAI 兼容 API 端点
+    pub base_url: String,
+    /// API Key
+    pub api_key: String,
+    /// 模型名称
+    pub model: String,
+}
+
+/// 获取提示词增强配置
+#[tauri::command]
+pub async fn get_enhance_config(state: State<'_, AppState>) -> Result<EnhanceConfigDto, String> {
+    let config = state.config.lock().map_err(|e| format!("获取配置失败: {}", e))?;
+    let mcp = &config.mcp_config;
+
+    Ok(EnhanceConfigDto {
+        provider: mcp.enhance_provider.clone().unwrap_or_else(|| "ollama".to_string()),
+        ollama_url: mcp.enhance_ollama_url.clone().unwrap_or_else(|| "http://localhost:11434".to_string()),
+        ollama_model: mcp.enhance_ollama_model.clone().unwrap_or_else(|| "qwen2.5-coder:7b".to_string()),
+        base_url: mcp.enhance_base_url.clone().unwrap_or_default(),
+        api_key: mcp.enhance_api_key.clone().unwrap_or_default(),
+        model: mcp.enhance_model.clone().unwrap_or_else(|| "Qwen/Qwen2.5-Coder-7B-Instruct".to_string()),
+    })
+}
+
+/// 保存提示词增强配置
+#[tauri::command]
+pub async fn save_enhance_config(
+    config_dto: EnhanceConfigDto,
+    state: State<'_, AppState>,
+    app: AppHandle,
+) -> Result<(), String> {
+    {
+        let mut config = state.config.lock().map_err(|e| format!("获取配置失败: {}", e))?;
+        let mcp = &mut config.mcp_config;
+
+        mcp.enhance_provider = Some(config_dto.provider);
+        mcp.enhance_ollama_url = Some(config_dto.ollama_url);
+        mcp.enhance_ollama_model = Some(config_dto.ollama_model);
+        mcp.enhance_base_url = if config_dto.base_url.is_empty() { None } else { Some(config_dto.base_url) };
+        mcp.enhance_api_key = if config_dto.api_key.is_empty() { None } else { Some(config_dto.api_key) };
+        mcp.enhance_model = Some(config_dto.model);
+    }
+
+    save_config(&state, &app).await
+        .map_err(|e| format!("保存配置失败: {}", e))?;
+
+    log::info!("提示词增强配置已保存");
+    Ok(())
+}
+
+// ============ 代码搜索（sou）配置命令 ============
+
+/// 代码搜索配置 DTO
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub struct SouConfigDto {
+    /// 模式: "local" | "acemcp"
+    pub mode: String,
+    /// 嵌入提供者: "jina" | "siliconflow" | "ollama" 等
+    pub embedding_provider: String,
+    /// 嵌入 API 端点
+    pub embedding_base_url: String,
+    /// 嵌入 API Key
+    pub embedding_api_key: String,
+    /// 嵌入模型名称
+    pub embedding_model: String,
+    /// 索引存储路径
+    pub index_path: String,
+}
+
+/// 获取代码搜索配置
+#[tauri::command]
+pub async fn get_sou_config(state: State<'_, AppState>) -> Result<SouConfigDto, String> {
+    let config = state.config.lock().map_err(|e| format!("获取配置失败: {}", e))?;
+    let mcp = &config.mcp_config;
+
+    Ok(SouConfigDto {
+        mode: mcp.sou_mode.clone().unwrap_or_else(|| "acemcp".to_string()),
+        embedding_provider: mcp.sou_embedding_provider.clone().unwrap_or_else(|| "jina".to_string()),
+        embedding_base_url: mcp.sou_embedding_base_url.clone().unwrap_or_default(),
+        embedding_api_key: mcp.sou_embedding_api_key.clone().unwrap_or_default(),
+        embedding_model: mcp.sou_embedding_model.clone().unwrap_or_default(),
+        index_path: mcp.sou_index_path.clone().unwrap_or_else(|| ".sanshu-index".to_string()),
+    })
+}
+
+/// 保存代码搜索配置
+#[tauri::command]
+pub async fn save_sou_config(
+    config_dto: SouConfigDto,
+    state: State<'_, AppState>,
+    app: AppHandle,
+) -> Result<(), String> {
+    {
+        let mut config = state.config.lock().map_err(|e| format!("获取配置失败: {}", e))?;
+        let mcp = &mut config.mcp_config;
+
+        mcp.sou_mode = Some(config_dto.mode);
+        mcp.sou_embedding_provider = Some(config_dto.embedding_provider);
+        mcp.sou_embedding_base_url = if config_dto.embedding_base_url.is_empty() { None } else { Some(config_dto.embedding_base_url) };
+        mcp.sou_embedding_api_key = if config_dto.embedding_api_key.is_empty() { None } else { Some(config_dto.embedding_api_key) };
+        mcp.sou_embedding_model = if config_dto.embedding_model.is_empty() { None } else { Some(config_dto.embedding_model) };
+        mcp.sou_index_path = Some(config_dto.index_path);
+    }
+
+    save_config(&state, &app).await
+        .map_err(|e| format!("保存配置失败: {}", e))?;
+
+    log::info!("代码搜索配置已保存");
+    Ok(())
+}
