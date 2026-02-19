@@ -19,6 +19,7 @@ pub mod mcp;
 
 // 重新导出主要类型和功能
 pub use manager::MemoryManager;
+pub use manager::SharedMemoryManager;
 pub use types::{MemoryEntry, MemoryCategory, MemoryMetadata, MemoryStore, MemoryConfig};
 pub use mcp::MemoryTool;
 pub use similarity::TextSimilarity;

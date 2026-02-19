@@ -28,6 +28,9 @@ const REQUEST_TIMEOUT_SECS: u64 = 30;
 /// 最大重试次数
 const MAX_RETRIES: usize = 3;
 
+/// HC-15: 最大缓存条目数（LRU 淘汰）
+const MAX_CACHE_ENTRIES: usize = 200;
+
 // ============ 缓存结构 ============
 
 /// 缓存条目
@@ -94,10 +97,24 @@ fn get_from_cache(key: &str) -> Option<IconSearchResult> {
 /// 存入缓存
 fn put_to_cache(key: String, result: IconSearchResult) {
     if let Ok(mut cache) = SEARCH_CACHE.write() {
-        cache.insert(key, CacheEntry {
-            result,
-            created_at: Instant::now(),
-        });
+        // HC-15: 容量上限检查，超限时淘汰最旧的条目（LRU）
+        if cache.len() >= MAX_CACHE_ENTRIES {
+            // 找到最旧的条目并移除
+            if let Some(oldest_key) = cache
+                .iter()
+                .min_by_key(|(_, entry)| entry.created_at)
+                .map(|(k, _)| k.clone())
+            {
+                cache.remove(&oldest_key);
+            }
+        }
+        cache.insert(
+            key,
+            CacheEntry {
+                result,
+                created_at: Instant::now(),
+            },
+        );
     }
 }
 

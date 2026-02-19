@@ -192,7 +192,7 @@ pub async fn reset_mcp_tools_config(
 
 // ============ 记忆管理相关命令 ============
 
-use crate::mcp::tools::memory::{MemoryManager, MemoryConfig};
+use crate::mcp::tools::memory::{SharedMemoryManager, MemoryConfig};
 
 /// 记忆条目 DTO（用于前端展示）
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
@@ -243,10 +243,11 @@ pub struct SimilarityPreviewDto {
 /// 获取记忆列表
 #[tauri::command]
 pub async fn get_memory_list(project_path: String) -> Result<Vec<MemoryEntryDto>, String> {
-    let manager = MemoryManager::new(&project_path)
+    let manager = SharedMemoryManager::new(&project_path)
         .map_err(|e| format!("创建记忆管理器失败: {}", e))?;
-    
-    let memories = manager.get_all_memories();
+
+    let memories = manager.get_all_memories()
+        .map_err(|e| format!("获取记忆列表失败: {}", e))?;
     let entries: Vec<MemoryEntryDto> = memories.iter().map(|m| MemoryEntryDto {
         id: m.id.clone(),
         content: m.content.clone(),
@@ -260,10 +261,11 @@ pub async fn get_memory_list(project_path: String) -> Result<Vec<MemoryEntryDto>
 /// 获取记忆统计
 #[tauri::command]
 pub async fn get_memory_stats(project_path: String) -> Result<MemoryStatsDto, String> {
-    let manager = MemoryManager::new(&project_path)
+    let manager = SharedMemoryManager::new(&project_path)
         .map_err(|e| format!("创建记忆管理器失败: {}", e))?;
-    
-    let stats = manager.get_stats();
+
+    let stats = manager.get_stats()
+        .map_err(|e| format!("获取统计失败: {}", e))?;
     Ok(MemoryStatsDto {
         total: stats.total,
         rules: stats.rules,
@@ -276,10 +278,11 @@ pub async fn get_memory_stats(project_path: String) -> Result<MemoryStatsDto, St
 /// 获取记忆配置
 #[tauri::command]
 pub async fn get_memory_config(project_path: String) -> Result<MemoryConfigDto, String> {
-    let manager = MemoryManager::new(&project_path)
+    let manager = SharedMemoryManager::new(&project_path)
         .map_err(|e| format!("创建记忆管理器失败: {}", e))?;
-    
-    let config = manager.config();
+
+    let config = manager.config()
+        .map_err(|e| format!("获取配置失败: {}", e))?;
     Ok(MemoryConfigDto {
         similarity_threshold: config.similarity_threshold,
         dedup_on_startup: config.dedup_on_startup,
@@ -290,13 +293,15 @@ pub async fn get_memory_config(project_path: String) -> Result<MemoryConfigDto, 
 /// 保存记忆配置
 #[tauri::command]
 pub async fn save_memory_config(project_path: String, config: MemoryConfigDto) -> Result<(), String> {
-    let mut manager = MemoryManager::new(&project_path)
+    let manager = SharedMemoryManager::new(&project_path)
         .map_err(|e| format!("创建记忆管理器失败: {}", e))?;
     
     let new_config = MemoryConfig {
         similarity_threshold: config.similarity_threshold.clamp(0.5, 0.95),
         dedup_on_startup: config.dedup_on_startup,
         enable_dedup: config.enable_dedup,
+        max_entry_bytes: 10240, // 10KB 默认值
+        max_entries: 1000,      // 1000 条默认值
     };
     
     manager.update_config(new_config)
@@ -309,7 +314,7 @@ pub async fn save_memory_config(project_path: String, config: MemoryConfigDto) -
 /// 执行去重整理
 #[tauri::command]
 pub async fn deduplicate_memories(project_path: String) -> Result<DedupResultDto, String> {
-    let mut manager = MemoryManager::new(&project_path)
+    let manager = SharedMemoryManager::new(&project_path)
         .map_err(|e| format!("创建记忆管理器失败: {}", e))?;
     
     let stats = manager.deduplicate_with_stats()
@@ -327,13 +332,16 @@ pub async fn deduplicate_memories(project_path: String) -> Result<DedupResultDto
 #[tauri::command]
 pub async fn preview_similarity(project_path: String, content: String) -> Result<SimilarityPreviewDto, String> {
     use crate::mcp::tools::memory::dedup::MemoryDeduplicator;
-    
-    let manager = MemoryManager::new(&project_path)
+
+    let manager = SharedMemoryManager::new(&project_path)
         .map_err(|e| format!("创建记忆管理器失败: {}", e))?;
-    
-    let threshold = manager.config().similarity_threshold;
+
+    let config = manager.config()
+        .map_err(|e| format!("获取配置失败: {}", e))?;
+    let threshold = config.similarity_threshold;
     let dedup = MemoryDeduplicator::new(threshold);
-    let memories: Vec<_> = manager.get_all_memories().iter().map(|e| (*e).clone()).collect();
+    let memories = manager.get_all_memories()
+        .map_err(|e| format!("获取记忆列表失败: {}", e))?;
     let dup_info = dedup.check_duplicate(&content, &memories);
     
     Ok(SimilarityPreviewDto {
@@ -348,9 +356,9 @@ pub async fn preview_similarity(project_path: String, content: String) -> Result
 /// 删除记忆
 #[tauri::command]
 pub async fn delete_memory(project_path: String, memory_id: String) -> Result<String, String> {
-    let mut manager = MemoryManager::new(&project_path)
+    let manager = SharedMemoryManager::new(&project_path)
         .map_err(|e| format!("创建记忆管理器失败: {}", e))?;
-    
+
     match manager.delete_memory(&memory_id) {
         Ok(Some(content)) => {
             log::info!("已删除记忆: {} - {}", memory_id, content);
@@ -359,6 +367,189 @@ pub async fn delete_memory(project_path: String, memory_id: String) -> Result<St
         Ok(None) => Err(format!("未找到指定 ID 的记忆: {}", memory_id)),
         Err(e) => Err(format!("删除记忆失败: {}", e)),
     }
+}
+
+/// 搜索记忆结果 DTO
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub struct SearchMemoryResultDto {
+    pub id: String,
+    pub content: String,
+    pub category: String,
+    pub created_at: String,
+    pub relevance: f64,
+    pub highlight: String,
+}
+
+/// 搜索记忆（支持关键词模糊匹配）
+#[tauri::command]
+pub async fn search_memories(
+    project_path: String,
+    query: String,
+    category: Option<String>,
+) -> Result<Vec<SearchMemoryResultDto>, String> {
+    use crate::mcp::tools::memory::similarity::TextSimilarity;
+
+    let manager = SharedMemoryManager::new(&project_path)
+        .map_err(|e| format!("创建记忆管理器失败: {}", e))?;
+
+    let memories = manager.get_all_memories()
+        .map_err(|e| format!("获取记忆列表失败: {}", e))?;
+
+    let query_lower = query.to_lowercase();
+    let query_normalized = TextSimilarity::normalize(&query);
+
+    let mut results: Vec<SearchMemoryResultDto> = memories
+        .iter()
+        .filter_map(|m| {
+            // 分类过滤
+            if let Some(ref cat) = category {
+                if m.category.display_name() != cat {
+                    return None;
+                }
+            }
+
+            // 计算相关度（结合包含匹配和相似度）
+            let content_lower = m.content.to_lowercase();
+            let mut relevance = 0.0;
+
+            // 精确包含匹配（高权重）
+            if content_lower.contains(&query_lower) {
+                relevance += 0.6;
+            }
+
+            // 词级匹配
+            let query_words: Vec<&str> = query_lower.split_whitespace().collect();
+            let matched_words = query_words.iter()
+                .filter(|w| content_lower.contains(*w))
+                .count();
+            if !query_words.is_empty() {
+                relevance += 0.2 * (matched_words as f64 / query_words.len() as f64);
+            }
+
+            // 相似度计算
+            let similarity = TextSimilarity::calculate(&query_normalized, &m.content_normalized);
+            relevance += 0.2 * similarity;
+
+            // 过滤低相关度结果
+            if relevance < 0.1 {
+                return None;
+            }
+
+            // 生成高亮片段（截取包含关键词的部分）
+            let highlight = generate_highlight(&m.content, &query_lower, 100);
+
+            Some(SearchMemoryResultDto {
+                id: m.id.clone(),
+                content: m.content.clone(),
+                category: m.category.display_name().to_string(),
+                created_at: m.created_at.to_rfc3339(),
+                relevance,
+                highlight,
+            })
+        })
+        .collect();
+
+    // 按相关度降序排序
+    results.sort_by(|a, b| b.relevance.partial_cmp(&a.relevance).unwrap_or(std::cmp::Ordering::Equal));
+
+    Ok(results)
+}
+
+/// 生成高亮片段
+fn generate_highlight(content: &str, query: &str, max_len: usize) -> String {
+    let content_lower = content.to_lowercase();
+
+    // 查找关键词位置
+    if let Some(pos) = content_lower.find(query) {
+        let start = pos.saturating_sub(20);
+        let end = (pos + query.len() + max_len).min(content.len());
+
+        let mut snippet = String::new();
+        if start > 0 {
+            snippet.push_str("...");
+        }
+        snippet.push_str(&content[start..end]);
+        if end < content.len() {
+            snippet.push_str("...");
+        }
+        snippet
+    } else {
+        // 未找到关键词，返回开头部分
+        if content.len() > max_len {
+            format!("{}...", &content[..max_len])
+        } else {
+            content.to_string()
+        }
+    }
+}
+
+/// 更新记忆 DTO
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub struct UpdateMemoryDto {
+    pub memory_id: String,
+    pub content: String,
+    pub append: bool,
+}
+
+/// 更新记忆内容（对接 SC-4）
+#[tauri::command]
+pub async fn update_memory(
+    project_path: String,
+    update: UpdateMemoryDto,
+) -> Result<String, String> {
+    let manager = SharedMemoryManager::new(&project_path)
+        .map_err(|e| format!("创建记忆管理器失败: {}", e))?;
+
+    match manager.update_memory(&update.memory_id, &update.content, update.append) {
+        Ok(Some(id)) => {
+            log::info!(
+                "已更新记忆: {} (append={})",
+                id,
+                update.append
+            );
+            Ok(id)
+        }
+        Ok(None) => Err(format!("未找到指定 ID 的记忆: {}", update.memory_id)),
+        Err(e) => Err(format!("更新记忆失败: {}", e)),
+    }
+}
+
+/// 导出记忆 DTO
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub struct ExportMemoriesDto {
+    pub version: String,
+    pub exported_at: String,
+    pub project_path: String,
+    pub total_count: usize,
+    pub entries: Vec<MemoryEntryDto>,
+}
+
+/// 导出记忆为 JSON 格式
+#[tauri::command]
+pub async fn export_memories(project_path: String) -> Result<ExportMemoriesDto, String> {
+    let manager = SharedMemoryManager::new(&project_path)
+        .map_err(|e| format!("创建记忆管理器失败: {}", e))?;
+
+    let memories = manager.get_all_memories()
+        .map_err(|e| format!("获取记忆列表失败: {}", e))?;
+
+    let entries: Vec<MemoryEntryDto> = memories
+        .iter()
+        .map(|m| MemoryEntryDto {
+            id: m.id.clone(),
+            content: m.content.clone(),
+            category: m.category.display_name().to_string(),
+            created_at: m.created_at.to_rfc3339(),
+        })
+        .collect();
+
+    Ok(ExportMemoriesDto {
+        version: "2.0".to_string(),
+        exported_at: chrono::Utc::now().to_rfc3339(),
+        project_path,
+        total_count: entries.len(),
+        entries,
+    })
 }
 
 // ============ 提示词增强配置命令 ============

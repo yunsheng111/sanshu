@@ -165,6 +165,7 @@ mod tests {
             acemcp_proxy_password: None,
             context7_api_key: None,
             skill_python_path: None,
+            skill_exec_timeout_secs: None,
             uiux_default_lang: None,
             uiux_output_format: None,
             uiux_max_results_cap: None,

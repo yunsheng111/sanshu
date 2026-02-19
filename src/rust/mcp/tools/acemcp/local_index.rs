@@ -10,6 +10,9 @@ use tokio::sync::RwLock;
 
 use super::embedding_client::EmbeddingClient;
 
+/// HC-14: 索引磁盘空间限制（默认 500MB）
+const MAX_INDEX_SIZE_BYTES: u64 = 500 * 1024 * 1024;
+
 /// 文件索引条目
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IndexEntry {
@@ -112,6 +115,16 @@ impl LocalIndexManager {
         // 先写入临时文件
         let tmp_path = self.index_path.with_extension("tmp");
         let serialized = bincode::serialize(index)?;
+
+        // HC-14: 索引磁盘空间限制检查
+        if serialized.len() as u64 > MAX_INDEX_SIZE_BYTES {
+            return Err(anyhow::anyhow!(
+                "索引大小 ({:.1}MB) 超过磁盘空间限制 ({:.0}MB)",
+                serialized.len() as f64 / (1024.0 * 1024.0),
+                MAX_INDEX_SIZE_BYTES as f64 / (1024.0 * 1024.0)
+            ));
+        }
+
         fs::write(&tmp_path, &serialized)?;
 
         // Windows 下 fs::rename 不能覆盖已存在的文件，需要先删除

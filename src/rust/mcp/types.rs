@@ -43,11 +43,11 @@ pub struct MemoryConfigRequest {
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 pub struct JiyiRequest {
-    #[schemars(description = "操作类型：记忆(添加) | 回忆(查询) | 整理(去重) | 列表(全部记忆) | 预览相似(检测相似度) | 配置(获取/更新) | 删除(移除记忆)")]
+    #[schemars(description = "操作类型：记忆(添加) | 回忆(查询) | 整理(去重) | 列表(全部记忆) | 预览相似(检测相似度) | 配置(获取/更新) | 删除(移除记忆) | 更新(修改记忆)")]
     pub action: String,
     #[schemars(description = "项目路径（必需）")]
     pub project_path: String,
-    #[schemars(description = "记忆内容（记忆/预览相似操作时必需）")]
+    #[schemars(description = "记忆内容（记忆/预览相似/更新操作时必需）")]
     #[serde(default)]
     pub content: String,
     #[schemars(
@@ -58,9 +58,12 @@ pub struct JiyiRequest {
     #[schemars(description = "配置参数（配置操作时使用）")]
     #[serde(default)]
     pub config: Option<MemoryConfigRequest>,
-    #[schemars(description = "记忆ID（删除操作时必需）")]
+    #[schemars(description = "记忆ID（删除/更新操作时必需）")]
     #[serde(default)]
     pub memory_id: Option<String>,
+    #[schemars(description = "更新模式：replace(完全替换，默认) | append(追加内容)")]
+    #[serde(default)]
+    pub update_mode: Option<String>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]

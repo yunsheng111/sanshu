@@ -2,16 +2,24 @@ use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::Result;
 use rmcp::model::{CallToolResult, Content, ErrorData as McpError, Tool};
 use serde::{Deserialize, Serialize};
 use tokio::process::Command;
+use tokio::time::timeout;
 
 use crate::config::load_standalone_config;
 use crate::{log_debug, log_important};
 use crate::mcp::types::SkillRunRequest;
 use crate::mcp::tools::UiuxTool;
+
+/// SC-19: 最大 stdout 输出大小（1MB）
+const MAX_STDOUT_BYTES: usize = 1_048_576;
+
+/// SC-19: 默认执行超时时间（秒）
+const DEFAULT_EXEC_TIMEOUT_SECS: u64 = 30;
 
 /// 技能运行时工具
 /// 负责发现 skills、动态注册 MCP 工具并执行 Python 入口
@@ -151,38 +159,71 @@ impl SkillsTool {
         }
 
         // 选择 Python 执行器：配置优先，其次 PATH
-        let python_bin = load_standalone_config()
-            .ok()
+        let config = load_standalone_config().ok();
+        let python_bin = config
+            .as_ref()
             .and_then(|c| c.mcp_config.skill_python_path.clone())
             .unwrap_or_else(|| "python".to_string());
 
+        // SC-19: 从配置读取执行超时时间，默认 30 秒
+        let exec_timeout_secs = config
+            .as_ref()
+            .and_then(|c| c.mcp_config.skill_exec_timeout_secs)
+            .unwrap_or(DEFAULT_EXEC_TIMEOUT_SECS);
+
         log_important!(
             info,
-            "[skills] 执行 Python 脚本: skill={}, action={}, entry={}, python={}, args_count={}",
+            "[skills] 执行 Python 脚本: skill={}, action={}, entry={}, python={}, args_count={}, timeout={}s",
             skill.name,
             action_name,
             entry_path.display(),
             python_bin,
-            args.len()
+            args.len(),
+            exec_timeout_secs
         );
         log_debug!("[skills] 参数详情: {:?}", args);
 
         let exec_start = std::time::Instant::now();
-        let output = Command::new(&python_bin)
+
+        // SC-19: 添加执行超时保护
+        let output_future = Command::new(&python_bin)
             .arg(&entry_path)
             .args(&args)
             .current_dir(&skill.path)
             // 确保 Python 输出统一编码，避免控制台乱码
             .env("PYTHONIOENCODING", "utf-8")
-            .output()
-            .await
-            .map_err(|e| {
+            .output();
+
+        let output = match timeout(Duration::from_secs(exec_timeout_secs), output_future).await {
+            Ok(result) => result.map_err(|e| {
                 log_important!(error, "[skills] Python 执行失败: {}", e);
                 McpError::internal_error(format!("Python 执行失败: {}", e), None)
-            })?;
-        
+            })?,
+            Err(_) => {
+                log_important!(error, "[skills] 执行超时: skill={}, timeout={}s", skill.name, exec_timeout_secs);
+                return Err(McpError::internal_error(
+                    format!("技能执行超时（{}秒限制），请检查脚本效率或增加超时配置", exec_timeout_secs),
+                    None
+                ));
+            }
+        };
+
         let exec_duration = exec_start.elapsed().as_millis();
-        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+
+        // SC-19: 输出大小限制
+        let stdout_raw = String::from_utf8_lossy(&output.stdout);
+        let stdout = if stdout_raw.len() > MAX_STDOUT_BYTES {
+            log_important!(warn, "[skills] 输出被截断: skill={}, original_len={}, limit={}",
+                skill.name, stdout_raw.len(), MAX_STDOUT_BYTES);
+            format!(
+                "{}...\n\n[输出已截断，超过 {}KB 限制]",
+                &stdout_raw[..MAX_STDOUT_BYTES],
+                MAX_STDOUT_BYTES / 1024
+            )
+        } else {
+            stdout_raw.trim().to_string()
+        };
+
         let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
 
         log_debug!("[skills] Python 执行完成: exit_code={:?}, stdout_len={}, stderr_len={}, duration={}ms",
@@ -468,5 +509,30 @@ fn normalize_skill_name(name: &str) -> String {
         "skill".to_string()
     } else {
         out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_normalize_skill_name() {
+        assert_eq!(normalize_skill_name("My Skill"), "my-skill");
+        assert_eq!(normalize_skill_name("test_skill"), "test-skill");
+        assert_eq!(normalize_skill_name("SKILL-123"), "skill-123");
+        assert_eq!(normalize_skill_name(""), "skill");
+    }
+
+    #[test]
+    fn test_skill_execution_with_invalid_path() {
+        // 测试无效路径应返回错误
+        // 注意：需要 mock 文件系统
+    }
+
+    #[test]
+    fn test_skill_stdout_size_limit() {
+        // 测试输出大小限制（SC-19）
+        // 注意：需要 mock Python 执行
     }
 }

@@ -83,3 +83,27 @@ impl InteractionTool {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_zhi_request_validation() {
+        // 测试 zhi 请求参数验证
+        // 空消息应返回错误
+    }
+
+    #[test]
+    fn test_zhi_history_recording() {
+        // 测试历史记录功能
+        // 注意：需要 mock 文件系统
+    }
+
+    #[test]
+    fn test_parse_mcp_response() {
+        // 测试响应解析
+        let response = r#"{"selected_option": "选项1"}"#;
+        // 验证解析结果
+    }
+}

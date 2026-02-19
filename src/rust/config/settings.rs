@@ -130,6 +130,8 @@ pub struct McpConfig {
     pub acemcp_proxy_password: Option<String>, // 代理密码（可选）
     pub context7_api_key: Option<String>, // Context7 API密钥 (可选，免费使用时可为空)
     pub skill_python_path: Option<String>, // Skill Python 路径（可选，默认走 PATH）
+    /// SC-19: Skill 执行超时时间（秒），默认 30
+    pub skill_exec_timeout_secs: Option<u64>,
 
     // UI/UX Pro Max 配置
     /// 默认语言（"zh" | "en"）
@@ -360,6 +362,7 @@ pub fn default_mcp_config() -> McpConfig {
         acemcp_proxy_password: None,
         context7_api_key: None,
         skill_python_path: None,
+        skill_exec_timeout_secs: None, // SC-19: 默认 30 秒
         // UI/UX Pro Max 默认配置
         uiux_default_lang: Some("zh".to_string()),
         uiux_output_format: Some("json".to_string()),

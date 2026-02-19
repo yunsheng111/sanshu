@@ -44,6 +44,64 @@ impl TextSimilarity {
         basic.max(contains)
     }
 
+    /// SC-7: Embedding 语义相似度（可选补充）
+    ///
+    /// 当本地 Embedding 服务（如 Ollama）可用时，使用语义向量相似度增强去重准确度。
+    /// 此方法为同步占位实现，实际调用需要异步版本 `calculate_with_embedding_async`。
+    ///
+    /// # 参数
+    /// - `s1`: 第一个文本
+    /// - `s2`: 第二个文本
+    /// - `embedding1`: 第一个文本的 embedding 向量（可选）
+    /// - `embedding2`: 第二个文本的 embedding 向量（可选）
+    ///
+    /// # 返回
+    /// 综合相似度分数（0.0 ~ 1.0）
+    /// - 若无 embedding，仅返回文本相似度
+    /// - 若有 embedding，返回 max(文本相似度, embedding 余弦相似度 * 0.9 + 0.1)
+    pub fn calculate_with_embedding(
+        s1: &str,
+        s2: &str,
+        embedding1: Option<&[f32]>,
+        embedding2: Option<&[f32]>,
+    ) -> f64 {
+        let text_sim = Self::calculate_enhanced(s1, s2);
+
+        // 如果没有 embedding 向量，仅使用文本相似度
+        match (embedding1, embedding2) {
+            (Some(e1), Some(e2)) => {
+                let embedding_sim = Self::cosine_similarity(e1, e2);
+                // embedding 相似度权重调整：0.9 * sim + 0.1 作为下限保护
+                let adjusted_embedding_sim = embedding_sim * 0.9 + 0.1;
+                // 取文本和语义相似度的较大值
+                text_sim.max(adjusted_embedding_sim)
+            }
+            _ => text_sim,
+        }
+    }
+
+    /// 余弦相似度计算
+    ///
+    /// 计算两个向量的余弦相似度
+    /// 公式: cos(θ) = (A · B) / (||A|| * ||B||)
+    pub fn cosine_similarity(v1: &[f32], v2: &[f32]) -> f64 {
+        if v1.len() != v2.len() || v1.is_empty() {
+            return 0.0;
+        }
+
+        let dot_product: f64 = v1.iter().zip(v2.iter()).map(|(a, b)| (*a as f64) * (*b as f64)).sum();
+        let norm1: f64 = v1.iter().map(|x| (*x as f64).powi(2)).sum::<f64>().sqrt();
+        let norm2: f64 = v2.iter().map(|x| (*x as f64).powi(2)).sum::<f64>().sqrt();
+
+        if norm1 == 0.0 || norm2 == 0.0 {
+            return 0.0;
+        }
+
+        // 余弦相似度范围 [-1, 1]，归一化到 [0, 1]
+        let cos_sim = dot_product / (norm1 * norm2);
+        (cos_sim + 1.0) / 2.0
+    }
+
     /// 编辑距离相似度 (Levenshtein)
     ///
     /// 计算将一个字符串转换为另一个字符串所需的最小编辑操作数

@@ -566,14 +566,19 @@ fn normalize_project_path(path: &str) -> String {
     p.replace('\\', "/")
 }
 
+/// HC-6: 统一错误分类 - 智能重试函数
+///
+/// 根据错误类型自动判断是否可重试，支持指数退避策略
 async fn retry_request<F, Fut, T>(mut f: F, max_retries: usize, base_delay_secs: f64) -> anyhow::Result<T>
 where
     F: FnMut() -> Fut,
     Fut: std::future::Future<Output = anyhow::Result<T>>,
 {
+    use crate::mcp::utils::errors::McpToolError;
+
     let mut attempt = 0usize;
-    let mut last_error_str: Option<String> = None;
-    
+    let mut last_error: Option<anyhow::Error> = None;
+
     while attempt < max_retries {
         match f().await {
             Ok(v) => {
@@ -583,32 +588,38 @@ where
                 return Ok(v);
             }
             Err(e) => {
-                last_error_str = Some(e.to_string());
                 attempt += 1;
-                
-                // 检查是否为可重试的错误
-                let error_str = e.to_string();
-                let is_retryable = error_str.contains("timeout") 
-                    || error_str.contains("connection") 
-                    || error_str.contains("network")
-                    || error_str.contains("temporary");
-                
+
+                // HC-6: 使用统一错误分类判断可重试性
+                let is_retryable = if let Some(mcp_err) = e.downcast_ref::<McpToolError>() {
+                    mcp_err.is_retryable()
+                } else {
+                    // 降级：字符串匹配（兼容旧代码）
+                    let error_str = e.to_string();
+                    error_str.contains("timeout")
+                        || error_str.contains("connection")
+                        || error_str.contains("network")
+                        || error_str.contains("temporary")
+                        || error_str.contains("rate limit")
+                        || error_str.contains("unavailable")
+                };
+
                 if attempt >= max_retries || !is_retryable {
                     log_debug!("请求失败，不再重试: {}", e);
                     return Err(e);
                 }
-                
+
                 let delay = base_delay_secs * 2f64.powi((attempt as i32) - 1);
                 let ms = (delay * 1000.0) as u64;
                 log_debug!("请求失败，准备重试({}/{}), 等待 {}ms: {}", attempt, max_retries, ms, e);
+
+                last_error = Some(e);
                 tokio::time::sleep(Duration::from_millis(ms)).await;
             }
         }
     }
-    
-    Err(last_error_str
-        .and_then(|s| anyhow::anyhow!(s).into())
-        .unwrap_or_else(|| anyhow::anyhow!("未知错误")))
+
+    Err(last_error.unwrap_or_else(|| anyhow::anyhow!("未知错误")))
 }
 
 pub(crate) fn home_projects_file() -> PathBuf {

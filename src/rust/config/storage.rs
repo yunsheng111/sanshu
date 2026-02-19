@@ -122,19 +122,34 @@ pub async fn load_config_and_apply_window_settings(
 }
 
 /// 独立加载配置文件（用于MCP服务器等独立进程）
+/// SC-20: 损坏文件自动备份并回退到默认配置
 pub fn load_standalone_config() -> Result<AppConfig> {
     let config_path = get_standalone_config_path()?;
 
     if config_path.exists() {
-        let config_json = fs::read_to_string(config_path)?;
-        let mut config: AppConfig = serde_json::from_str(&config_json)?;
-
-        // 合并默认快捷键配置
-        merge_default_shortcuts(&mut config);
-        // 合并默认提示词配置
-        merge_default_custom_prompts(&mut config);
-
-        Ok(config)
+        let config_json = fs::read_to_string(&config_path)?;
+        match serde_json::from_str::<AppConfig>(&config_json) {
+            Ok(mut config) => {
+                // 合并默认快捷键配置
+                merge_default_shortcuts(&mut config);
+                // 合并默认提示词配置
+                merge_default_custom_prompts(&mut config);
+                Ok(config)
+            }
+            Err(e) => {
+                // SC-20: 配置文件损坏，备份并使用默认配置
+                let backup_path = config_path.with_extension("json.corrupted.bak");
+                if let Err(copy_err) = fs::copy(&config_path, &backup_path) {
+                    log::warn!("备份损坏配置文件失败: {}", copy_err);
+                } else {
+                    log::warn!(
+                        "配置文件损坏已备份到 {:?}，将使用默认配置: {}",
+                        backup_path, e
+                    );
+                }
+                Ok(AppConfig::default())
+            }
+        }
     } else {
         // 如果配置文件不存在，返回默认配置
         Ok(AppConfig::default())

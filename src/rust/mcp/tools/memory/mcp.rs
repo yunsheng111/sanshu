@@ -1,7 +1,7 @@
 use anyhow::Result;
 use rmcp::model::{ErrorData as McpError, CallToolResult, Content};
 
-use super::{MemoryManager, MemoryCategory};
+use super::{SharedMemoryManager, MemoryCategory};
 use crate::mcp::{JiyiRequest, utils::{validate_project_path, project_path_error}};
 use crate::{log_debug, log_important};
 
@@ -33,13 +33,14 @@ impl MemoryTool {
 
         // 创建记忆管理器（会自动执行迁移和启动时去重）
         // 支持非 Git 项目降级模式
+        // 使用 SharedMemoryManager 提供并发安全访问
         let start = std::time::Instant::now();
-        let mut manager = MemoryManager::new(&request.project_path)
+        let manager = SharedMemoryManager::new(&request.project_path)
             .map_err(|e| {
                 log_important!(error, "[ji] 创建记忆管理器失败: {}", e);
                 McpError::internal_error(format!("创建记忆管理器失败: {}", e), None)
             })?;
-        log_debug!("[ji] 记忆管理器创建完成: elapsed={}ms, is_non_git={}", 
+        log_debug!("[ji] 记忆管理器创建完成: elapsed={}ms, is_non_git={}",
             start.elapsed().as_millis(), manager.is_non_git_project());
 
         // 非 Git 项目提示（仅在降级模式时显示）
@@ -102,7 +103,8 @@ impl MemoryTool {
             }
             "回忆" => {
                 log_debug!("[ji] 执行回忆操作");
-                let info = manager.get_project_info();
+                let info = manager.get_project_info()
+                    .map_err(|e| McpError::internal_error(format!("获取项目信息失败: {}", e), None))?;
                 log_important!(info, "[ji] 回忆完成: info_len={}", info.len());
                 format!("{}{}{}", info, index_hint, non_git_hint)
             }
@@ -132,7 +134,8 @@ impl MemoryTool {
             // === 新增: 列表 (获取全部记忆) ===
             "列表" => {
                 log_debug!("[ji] 执行列表操作");
-                let memories = manager.get_all_memories();
+                let memories = manager.get_all_memories()
+                    .map_err(|e| McpError::internal_error(format!("获取记忆列表失败: {}", e), None))?;
                 let entries: Vec<serde_json::Value> = memories.iter().map(|m| {
                     serde_json::json!({
                         "id": m.id,
@@ -141,8 +144,9 @@ impl MemoryTool {
                         "created_at": m.created_at.to_rfc3339()
                     })
                 }).collect();
-                
-                let stats = manager.get_stats();
+
+                let stats = manager.get_stats()
+                    .map_err(|e| McpError::internal_error(format!("获取统计失败: {}", e), None))?;
                 log_important!(info, "[ji] 列表完成: total={}", stats.total);
                 let json_result = serde_json::json!({
                     "total": stats.total,
@@ -164,17 +168,21 @@ impl MemoryTool {
                 }
                 
                 log_debug!("[ji] 执行预览相似: content_len={}", request.content.len());
-                let dedup = super::dedup::MemoryDeduplicator::new(manager.config().similarity_threshold);
-                let dup_info = dedup.check_duplicate(&request.content, &manager.get_all_memories().iter().map(|e| (*e).clone()).collect::<Vec<_>>());
-                
-                log_important!(info, "[ji] 相似度检测完成: is_dup={}, similarity={:.1}%", 
+                let config = manager.config()
+                    .map_err(|e| McpError::internal_error(format!("获取配置失败: {}", e), None))?;
+                let dedup = super::dedup::MemoryDeduplicator::new(config.similarity_threshold);
+                let all_memories = manager.get_all_memories()
+                    .map_err(|e| McpError::internal_error(format!("获取记忆列表失败: {}", e), None))?;
+                let dup_info = dedup.check_duplicate(&request.content, &all_memories);
+
+                log_important!(info, "[ji] 相似度检测完成: is_dup={}, similarity={:.1}%",
                     dup_info.is_duplicate, dup_info.similarity * 100.0);
-                
+
                 let json_result = serde_json::json!({
                     "is_duplicate": dup_info.is_duplicate,
                     "similarity": format!("{:.1}%", dup_info.similarity * 100.0),
                     "similarity_value": dup_info.similarity,
-                    "threshold": manager.config().similarity_threshold,
+                    "threshold": config.similarity_threshold,
                     "matched_id": dup_info.matched_id,
                     "matched_content": dup_info.matched_content
                 });
@@ -194,7 +202,9 @@ impl MemoryTool {
                 // 如果提供了 config 参数，则更新配置
                 if let Some(config_req) = request.config {
                     log_debug!("[ji] 执行配置更新: {:?}", config_req);
-                    let mut new_config = manager.config().clone();
+                    let current_config = manager.config()
+                        .map_err(|e| McpError::internal_error(format!("获取配置失败: {}", e), None))?;
+                    let mut new_config = current_config.clone();
                     
                     if let Some(threshold) = config_req.similarity_threshold {
                         // 验证阈值范围
@@ -229,7 +239,8 @@ impl MemoryTool {
                 } else {
                     // 返回当前配置
                     log_debug!("[ji] 获取当前配置");
-                    let config = manager.config();
+                    let config = manager.config()
+                        .map_err(|e| McpError::internal_error(format!("获取配置失败: {}", e), None))?;
                     let json_result = serde_json::json!({
                         "similarity_threshold": config.similarity_threshold,
                         "dedup_on_startup": config.dedup_on_startup,
@@ -262,10 +273,52 @@ impl MemoryTool {
                     }
                 }
             }
+            // === 新增: 更新 (修改指定记忆) ===
+            "更新" => {
+                let memory_id = request.memory_id.as_deref()
+                    .ok_or_else(|| {
+                        log_important!(warn, "[ji] 更新失败: 缺少 memory_id");
+                        McpError::invalid_params("缺少 memory_id 参数".to_string(), None)
+                    })?;
+
+                if request.content.trim().is_empty() {
+                    log_important!(warn, "[ji] 更新失败: 内容为空");
+                    return Err(McpError::invalid_params("缺少更新内容（content 参数）".to_string(), None));
+                }
+
+                // 解析更新模式：默认 replace，支持 append
+                let append = matches!(request.update_mode.as_deref(), Some("append"));
+                let mode_label = if append { "追加" } else { "替换" };
+
+                log_debug!("[ji] 执行更新操作: memory_id={}, mode={}, content_len={}",
+                    memory_id, mode_label, request.content.len());
+
+                match manager.update_memory(memory_id, &request.content, append) {
+                    Ok(Some(id)) => {
+                        log_important!(info, "[ji] 更新成功: id={}, mode={}", id, mode_label);
+                        format!(
+                            "✅ 记忆已更新\n🆔 ID: {}\n📝 模式: {}\n📄 新内容: {}{}{}",
+                            id,
+                            mode_label,
+                            request.content,
+                            index_hint,
+                            non_git_hint
+                        )
+                    }
+                    Ok(None) => {
+                        log_debug!("[ji] 更新失败: 未找到记忆 id={}", memory_id);
+                        format!("⚠️ 未找到指定 ID 的记忆: {}", memory_id)
+                    }
+                    Err(e) => {
+                        log_important!(error, "[ji] 更新记忆失败: {}", e);
+                        return Err(McpError::internal_error(format!("更新记忆失败: {}", e), None));
+                    }
+                }
+            }
             _ => {
                 log_important!(warn, "[ji] 未知操作类型: {}", request.action);
                 return Err(McpError::invalid_params(
-                    format!("未知的操作类型: {}。支持的操作: 记忆 | 回忆 | 整理 | 列表 | 预览相似 | 配置 | 删除", request.action),
+                    format!("未知的操作类型: {}。支持的操作: 记忆 | 回忆 | 整理 | 列表 | 预览相似 | 配置 | 删除 | 更新", request.action),
                     None
                 ));
             }

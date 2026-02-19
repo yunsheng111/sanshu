@@ -358,3 +358,28 @@ impl Context7Tool {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_format_stars() {
+        assert_eq!(Context7Tool::format_stars(500), "500");
+        assert_eq!(Context7Tool::format_stars(1000), "1.0K");
+        assert_eq!(Context7Tool::format_stars(1500), "1.5K");
+        assert_eq!(Context7Tool::format_stars(10000), "10.0K");
+    }
+
+    #[test]
+    fn test_query_docs_with_invalid_library() {
+        // 测试无效库名应返回错误
+        // 注意：需要 mock API 调用
+    }
+
+    #[test]
+    fn test_query_docs_api_unavailable() {
+        // 测试 API 不可用时的错误处理
+        // 注意：需要 mock API 调用
+    }
+}

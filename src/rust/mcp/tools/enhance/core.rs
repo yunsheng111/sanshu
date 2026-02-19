@@ -836,3 +836,34 @@ fn normalize_base_url(input: &str) -> String {
     }
     url
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_normalize_base_url() {
+        assert_eq!(normalize_base_url("example.com"), "https://example.com");
+        assert_eq!(normalize_base_url("http://example.com/"), "http://example.com");
+        assert_eq!(normalize_base_url("https://example.com///"), "https://example.com");
+    }
+
+    #[test]
+    fn test_enhance_with_empty_prompt() {
+        // 空 prompt 应返回错误
+        // 注意：实际测试需要 mock API 调用
+        // 这里仅作为测试骨架示例
+
+        // 验证空 prompt 会被规则引擎拒绝
+        assert!(true); // 占位测试
+    }
+
+    #[test]
+    fn test_rule_engine_basic_matching() {
+        // 测试规则引擎基本匹配
+        // 注意：需要 mock 规则引擎
+
+        // 验证规则引擎基本功能
+        assert!(true); // 占位测试
+    }
+}

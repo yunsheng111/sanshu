@@ -140,7 +140,7 @@ impl ServerHandler for ZhiServer {
                 "properties": {
                     "action": {
                         "type": "string",
-                        "description": "操作类型：记忆(添加) | 回忆(查询) | 整理(去重) | 列表(全部记忆) | 预览相似(检测相似度) | 配置(获取/更新) | 删除(移除记忆)"
+                        "description": "操作类型：记忆(添加) | 回忆(查询) | 整理(去重) | 列表(全部记忆) | 预览相似(检测相似度) | 配置(获取/更新) | 删除(移除记忆) | 更新(修改记忆)"
                     },
                     "project_path": {
                         "type": "string",
@@ -148,7 +148,7 @@ impl ServerHandler for ZhiServer {
                     },
                     "content": {
                         "type": "string",
-                        "description": "记忆内容（记忆/预览相似操作时必需）"
+                        "description": "记忆内容（记忆/预览相似/更新操作时必需）"
                     },
                     "category": {
                         "type": "string",
@@ -174,7 +174,11 @@ impl ServerHandler for ZhiServer {
                     },
                     "memory_id": {
                         "type": "string",
-                        "description": "记忆ID（删除操作时必需）"
+                        "description": "记忆ID（删除/更新操作时必需）"
+                    },
+                    "update_mode": {
+                        "type": "string",
+                        "description": "更新模式：replace(完全替换，默认) | append(追加内容)"
                     }
                 },
                 "required": ["action", "project_path"]

@@ -1,12 +1,19 @@
 <script setup lang="ts">
 /**
  * 记忆管理配置组件
- * 包含：配置设置、记忆列表、相似度预览
+ * 包含：配置设置、记忆列表、搜索、相似度预览、导出功能
+ *
+ * Step 18: 记忆管理 UI — 前端组件增强
+ * - 集成 MemorySearch 组件
+ * - 集成 MemoryList 组件
+ * - 添加导出功能
  */
 import { invoke } from '@tauri-apps/api/core'
 import { useMessage } from 'naive-ui'
 import { computed, onMounted, ref, watch } from 'vue'
 import ConfigSection from '../common/ConfigSection.vue'
+import MemorySearch from './MemorySearch.vue'
+import MemoryList from './MemoryList.vue'
 
 // Props
 const props = defineProps<{
@@ -53,10 +60,31 @@ interface SimilarityPreview {
   threshold: number
 }
 
+interface ExportMemories {
+  version: string
+  exported_at: string
+  project_path: string
+  total_count: number
+  entries: MemoryEntry[]
+}
+
+interface SearchResult {
+  id: string
+  content: string
+  category: string
+  created_at: string
+  relevance: number
+  highlight: string
+}
+
 // ============ 状态 ============
 const currentTab = ref('config')
 const loading = ref(false)
 const projectPath = computed(() => props.projectRootPath || '')
+
+// 组件引用
+const memoryListRef = ref<InstanceType<typeof MemoryList> | null>(null)
+const memorySearchRef = ref<InstanceType<typeof MemorySearch> | null>(null)
 
 // 配置状态
 const config = ref<MemoryConfig>({
@@ -76,6 +104,15 @@ const expandedCategories = ref<string[]>(['规范', '偏好', '模式', '背景'
 // 去重状态
 const dedupLoading = ref(false)
 const lastDedupResult = ref<DedupResult | null>(null)
+
+// 导出状态
+const exportLoading = ref(false)
+
+// 编辑模态框状态
+const showEditModal = ref(false)
+const editingMemory = ref<SearchResult | null>(null)
+const editContent = ref('')
+const editSaving = ref(false)
 
 // 相似度预览状态
 const previewContent = ref('')
@@ -223,6 +260,92 @@ async function deleteMemory(id: string) {
   }
 }
 
+// ============ 导出功能 ============
+async function exportMemories() {
+  if (!projectPath.value) return
+  exportLoading.value = true
+  try {
+    const data = await invoke<ExportMemories>('export_memories', {
+      projectPath: projectPath.value,
+    })
+
+    // 生成 JSON 文件内容
+    const jsonStr = JSON.stringify(data, null, 2)
+    const blob = new Blob([jsonStr], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+
+    // 创建下载链接
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `sanshu-memories-${new Date().toISOString().slice(0, 10)}.json`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+
+    message.success(`已导出 ${data.total_count} 条记忆`)
+  }
+  catch (err) {
+    message.error(`导出失败: ${err}`)
+  }
+  finally {
+    exportLoading.value = false
+  }
+}
+
+// ============ 编辑功能 ============
+function handleEdit(memory: SearchResult) {
+  editingMemory.value = memory
+  editContent.value = memory.content
+  showEditModal.value = true
+}
+
+async function saveEdit() {
+  if (!editingMemory.value || !editContent.value.trim()) {
+    message.warning('内容不能为空')
+    return
+  }
+
+  editSaving.value = true
+  try {
+    await invoke('update_memory', {
+      projectPath: projectPath.value,
+      update: {
+        memory_id: editingMemory.value.id,
+        content: editContent.value.trim(),
+        append: false,
+      },
+    })
+
+    message.success('记忆已更新')
+    closeEditModal()
+    await loadMemories()
+    memoryListRef.value?.refresh()
+  }
+  catch (err) {
+    message.error(`更新失败: ${err}`)
+  }
+  finally {
+    editSaving.value = false
+  }
+}
+
+function closeEditModal() {
+  showEditModal.value = false
+  editingMemory.value = null
+  editContent.value = ''
+}
+
+// ============ 搜索结果处理 ============
+async function handleSearchDelete(memoryId: string) {
+  await deleteMemory(memoryId)
+  memorySearchRef.value?.search()
+}
+
+function handleStatsUpdate(newStats: MemoryStats) {
+  stats.value = newStats
+}
+
 function formatDate(isoString: string): string {
   try {
     return new Date(isoString).toLocaleString('zh-CN')
@@ -346,6 +469,12 @@ onMounted(async () => {
                     </template>
                     立即整理
                   </n-button>
+                  <n-button secondary :loading="exportLoading" @click="exportMemories">
+                    <template #icon>
+                      <div class="i-carbon-export" />
+                    </template>
+                    导出记忆
+                  </n-button>
                 </n-space>
               </ConfigSection>
 
@@ -394,77 +523,27 @@ onMounted(async () => {
         <!-- 记忆列表 Tab -->
         <n-tab-pane name="list" tab="记忆列表">
           <n-scrollbar class="tab-scrollbar">
-            <n-space vertical size="medium" class="tab-content">
-              <!-- 加载骨架屏 -->
-              <div v-if="listLoading" class="skeleton-list">
-                <n-skeleton v-for="i in 4" :key="i" text :repeat="2" />
-              </div>
+            <MemoryList
+              ref="memoryListRef"
+              :project-root-path="projectPath"
+              :active="currentTab === 'list'"
+              @refresh="loadMemories"
+              @stats-updated="handleStatsUpdate"
+            />
+          </n-scrollbar>
+        </n-tab-pane>
 
-              <!-- 空状态 -->
-              <div v-else-if="memories.length === 0" class="empty-list">
-                <div class="i-carbon-document text-4xl mb-2 opacity-20" />
-                <div class="text-sm opacity-60">暂无记忆条目</div>
-              </div>
-
-              <!-- 分组列表 -->
-              <n-collapse v-else v-model:expanded-names="expandedCategories" arrow-placement="left">
-                <n-collapse-item
-                  v-for="(items, category) in groupedMemories"
-                  :key="category"
-                  :name="category"
-                  :disabled="items.length === 0"
-                >
-                  <template #header>
-                    <div class="category-header">
-                      <div :class="[getCategoryIcon(category), getCategoryColor(category)]" />
-                      <span>{{ category }}</span>
-                      <n-tag size="small" :bordered="false">{{ items.length }}</n-tag>
-                    </div>
-                  </template>
-
-                  <div class="memory-list">
-                    <div v-for="item in items" :key="item.id" class="memory-item">
-                      <div class="memory-content">
-                        {{ item.content }}
-                      </div>
-                      <div class="memory-meta">
-                        <span class="memory-time">{{ formatDate(item.created_at) }}</span>
-                        <n-popconfirm
-                          :show="deleteConfirmId === item.id"
-                          @positive-click="deleteMemory(item.id)"
-                          @negative-click="deleteConfirmId = null"
-                        >
-                          <template #trigger>
-                            <n-button
-                              text
-                              type="error"
-                              size="tiny"
-                              :loading="deleteLoading && deleteConfirmId === item.id"
-                              @click="deleteConfirmId = item.id"
-                            >
-                              <template #icon>
-                                <div class="i-carbon-trash-can" />
-                              </template>
-                            </n-button>
-                          </template>
-                          确定要删除这条记忆吗？
-                        </n-popconfirm>
-                      </div>
-                    </div>
-                  </div>
-                </n-collapse-item>
-              </n-collapse>
-
-              <!-- 刷新按钮 -->
-              <div class="flex justify-center pt-2">
-                <n-button text type="primary" :loading="listLoading" @click="loadMemories">
-                  <template #icon>
-                    <div class="i-carbon-renew" />
-                  </template>
-                  刷新列表
-                </n-button>
-              </div>
-            </n-space>
+        <!-- 搜索 Tab -->
+        <n-tab-pane name="search" tab="搜索">
+          <n-scrollbar class="tab-scrollbar">
+            <div class="tab-content">
+              <MemorySearch
+                ref="memorySearchRef"
+                :project-root-path="projectPath"
+                @edit="handleEdit"
+                @delete="handleSearchDelete"
+              />
+            </div>
           </n-scrollbar>
         </n-tab-pane>
 
@@ -479,11 +558,13 @@ onMounted(async () => {
                     type="textarea"
                     :rows="3"
                     placeholder="输入要检测的内容..."
+                    aria-label="待检测内容输入框"
                   />
                   <n-button
                     type="primary"
                     :loading="previewLoading"
                     :disabled="!previewContent.trim()"
+                    aria-describedby="similarity-result"
                     @click="previewSimilarity"
                   >
                     <template #icon>
@@ -541,6 +622,44 @@ onMounted(async () => {
         </n-tab-pane>
       </n-tabs>
     </template>
+
+    <!-- 编辑模态框 -->
+    <n-modal
+      v-model:show="showEditModal"
+      preset="card"
+      title="编辑记忆"
+      :style="{ width: '600px' }"
+      :mask-closable="false"
+    >
+      <n-space vertical size="medium">
+        <div v-if="editingMemory" class="edit-info">
+          <div class="edit-category">
+            <div :class="[getCategoryIcon(editingMemory.category), getCategoryColor(editingMemory.category)]" />
+            <span>{{ editingMemory.category }}</span>
+          </div>
+          <span class="edit-time">{{ formatDate(editingMemory.created_at) }}</span>
+        </div>
+
+        <n-input
+          v-model:value="editContent"
+          type="textarea"
+          :rows="6"
+          placeholder="输入新内容..."
+          :disabled="editSaving"
+        />
+      </n-space>
+
+      <template #footer>
+        <n-space justify="end">
+          <n-button @click="closeEditModal" :disabled="editSaving">
+            取消
+          </n-button>
+          <n-button type="primary" :loading="editSaving" @click="saveEdit">
+            保存
+          </n-button>
+        </n-space>
+      </template>
+    </n-modal>
   </div>
 </template>
 
@@ -772,5 +891,34 @@ onMounted(async () => {
 
 :root.dark .matched-text {
   color: #e5e7eb;
+}
+
+/* 编辑模态框 */
+.edit-info {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: var(--color-container, rgba(255, 255, 255, 0.5));
+  border: 1px solid var(--color-border, rgba(128, 128, 128, 0.15));
+}
+
+:root.dark .edit-info {
+  background: rgba(24, 24, 28, 0.5);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.edit-category {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.edit-time {
+  font-size: 11px;
+  color: var(--color-on-surface-secondary, #9ca3af);
 }
 </style>
