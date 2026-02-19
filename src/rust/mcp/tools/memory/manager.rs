@@ -16,7 +16,7 @@ use super::types::{MemoryEntry, MemoryCategory, MemoryStore, MemoryConfig, Memor
 use super::similarity::TextSimilarity;
 use super::dedup::MemoryDeduplicator;
 use super::migration::MemoryMigrator;
-use crate::log_debug;
+use crate::{log_debug, log_important};
 
 /// 记忆管理器
 pub struct MemoryManager {
@@ -215,12 +215,24 @@ impl MemoryManager {
             updated_at: now,
             version: 1,
             snapshots: Vec::new(),
+            uri_path: None,
+            domain: None,
+            tags: None,
+            vitality_score: Some(1.5),
+            last_accessed_at: Some(now),
+            summary: None,
         };
 
-        self.store.entries.push(entry);
+        self.store.entries.push(entry.clone());
         self.save_store()?;
 
         log_debug!("已添加记忆: {} ({:?})", id, category);
+
+        // Task 3: 触发后台摘要生成（如果满足条件）
+        if self.should_auto_generate_summary(&entry.content, &entry.summary) {
+            self.spawn_summary_backfill_task(id.clone(), entry.content.clone());
+        }
+
         Ok(Some(id))
     }
 
@@ -482,6 +494,211 @@ impl MemoryManager {
         self.save_store()
     }
 
+    /// Task 2 新增：获取域列表及统计
+    pub fn get_domain_list(&self) -> Vec<(String, usize)> {
+        let mut domain_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        for entry in &self.store.entries {
+            if let Some(domain) = &entry.domain {
+                *domain_counts.entry(domain.clone()).or_insert(0) += 1;
+            } else {
+                *domain_counts.entry("legacy".to_string()).or_insert(0) += 1;
+            }
+        }
+        let mut result: Vec<_> = domain_counts.into_iter().collect();
+        result.sort_by(|a, b| b.1.cmp(&a.1));
+        result
+    }
+
+    /// Task 2 新增：获取清理候选列表
+    pub fn get_cleanup_candidates(&self) -> Vec<super::vitality::CleanupCandidate> {
+        super::vitality::VitalityEngine::get_cleanup_candidates(&self.store.entries, &self.store.config)
+    }
+
+    /// Task 2 新增：获取活力值趋势
+    pub fn get_vitality_trend(&self, memory_id: &str) -> Option<super::types::VitalityTrend> {
+        use super::types::{VitalityTrend, VitalityTrendPoint};
+
+        let entry = self.store.entries.iter().find(|e| e.id == memory_id)?;
+
+        let current_vitality = entry.vitality_score.unwrap_or(1.5);
+        let last_accessed = entry.last_accessed_at.unwrap_or(entry.updated_at);
+
+        // 计算当前实时活力值（考虑衰减）
+        let current_decayed = super::vitality::VitalityEngine::calculate_current_vitality(
+            current_vitality,
+            last_accessed,
+            self.store.config.vitality_decay_half_life_days,
+        );
+
+        // 基于快照历史构建趋势点
+        let mut trend_points = Vec::new();
+
+        // 添加创建时间点
+        trend_points.push(VitalityTrendPoint {
+            timestamp: entry.created_at,
+            vitality_score: 1.5,
+            event: "创建".to_string(),
+        });
+
+        // 添加快照时间点
+        for snapshot in &entry.snapshots {
+            trend_points.push(VitalityTrendPoint {
+                timestamp: snapshot.created_at,
+                vitality_score: entry.vitality_score.unwrap_or(1.5),
+                event: format!("更新到版本 {}", snapshot.version),
+            });
+        }
+
+        // 添加当前时间点
+        trend_points.push(VitalityTrendPoint {
+            timestamp: Utc::now(),
+            vitality_score: current_decayed,
+            event: "当前".to_string(),
+        });
+
+        // 按时间排序
+        trend_points.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
+
+        Some(VitalityTrend {
+            memory_id: memory_id.to_string(),
+            current_vitality: current_decayed,
+            base_vitality: current_vitality,
+            last_accessed_at: last_accessed,
+            trend_points,
+        })
+    }
+
+    /// Task 2 新增：获取记忆快照列表
+    pub fn get_memory_snapshots(&self, memory_id: &str) -> Option<Vec<MemorySnapshot>> {
+        let entry = self.store.entries.iter().find(|e| e.id == memory_id)?;
+        Some(entry.snapshots.clone())
+    }
+
+    /// Task 2 新增：回滚到指定快照版本
+    pub fn rollback_to_snapshot(&mut self, memory_id: &str, target_version: u32) -> Result<Option<u32>> {
+        self.rollback_memory(memory_id, Some(target_version))
+    }
+
+    /// Task 2 新增：添加记忆并返回 Write Guard 判定结果
+    pub fn add_memory_with_guard_result(
+        &mut self,
+        content: &str,
+        category: MemoryCategory,
+    ) -> Result<(Option<String>, super::write_guard::WriteGuardResult)> {
+        use super::write_guard::{WriteGuard, WriteGuardAction};
+
+        let content = content.trim();
+        if content.is_empty() {
+            return Err(anyhow::anyhow!("记忆内容不能为空"));
+        }
+
+        // HC-10: 大小限制
+        if content.len() > self.store.config.max_entry_bytes {
+            return Err(anyhow::anyhow!(
+                "记忆内容超过大小限制: {} 字节 > {} 字节上限",
+                content.len(), self.store.config.max_entry_bytes
+            ));
+        }
+
+        // HC-10: 数量限制
+        if self.store.entries.len() >= self.store.config.max_entries {
+            return Err(anyhow::anyhow!(
+                "记忆条目数已达上限: {} / {}",
+                self.store.entries.len(), self.store.config.max_entries
+            ));
+        }
+
+        // HC-11: Write Guard
+        let guard_result = WriteGuard::check(content, &self.store.entries, &self.store.config);
+
+        match &guard_result.action {
+            WriteGuardAction::Noop { .. } => {
+                return Ok((None, guard_result));
+            }
+            WriteGuardAction::Update { matched_id, .. } => {
+                let merge_content = format!("\n---\n{}", content);
+                let update_result = self.update_memory(matched_id, &merge_content, true)?;
+                return Ok((update_result, guard_result));
+            }
+            WriteGuardAction::Add => {}
+        }
+
+        // 正常新增
+        let id = uuid::Uuid::new_v4().to_string();
+        let now = Utc::now();
+        let entry = MemoryEntry {
+            id: id.clone(),
+            content: content.to_string(),
+            content_normalized: super::similarity::TextSimilarity::normalize(content),
+            category,
+            created_at: now,
+            updated_at: now,
+            version: 1,
+            snapshots: Vec::new(),
+            uri_path: None,
+            domain: None,
+            tags: None,
+            vitality_score: Some(1.5),
+            last_accessed_at: Some(now),
+            summary: None,
+        };
+
+        self.store.entries.push(entry.clone());
+        self.save_store()?;
+
+        // Task 3: 触发后台摘要生成
+        if self.should_auto_generate_summary(&entry.content, &entry.summary) {
+            self.spawn_summary_backfill_task(id.clone(), entry.content.clone());
+        }
+
+        Ok((Some(id), guard_result))
+    }
+
+    /// Task 4: 访问记忆（提升活力值）
+    pub fn access_memory(&mut self, memory_id: &str) -> Result<()> {
+        if let Some(entry) = self.store.entries.iter_mut().find(|e| e.id == memory_id) {
+            super::vitality::VitalityEngine::boost_vitality(entry, &self.store.config);
+            self.save_store()?;
+        }
+        Ok(())
+    }
+
+    /// Task 2 新增：设置记忆的 URI 路径和标签
+    pub fn classify_memory(
+        &mut self,
+        memory_id: &str,
+        uri_path: Option<&str>,
+        tags: Option<Vec<String>>,
+    ) -> Result<Option<String>> {
+        let entry_idx = self.store.entries.iter().position(|e| e.id == memory_id);
+        if let Some(idx) = entry_idx {
+            if let Some(uri) = uri_path {
+                let parsed = super::uri_path::UriPathParser::parse(uri)?;
+                self.store.entries[idx].uri_path = Some(parsed.full_path);
+                self.store.entries[idx].domain = Some(parsed.domain.clone());
+            }
+            if let Some(t) = tags {
+                self.store.entries[idx].tags = Some(t);
+            }
+            self.store.entries[idx].updated_at = Utc::now();
+            self.save_store()?;
+            Ok(Some(memory_id.to_string()))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Task 2 新增：执行清理（删除指定 ID 列表的记忆）
+    pub fn execute_cleanup(&mut self, ids: &[String]) -> Result<usize> {
+        let before = self.store.entries.len();
+        self.store.entries.retain(|e| !ids.contains(&e.id));
+        let removed = before - self.store.entries.len();
+        if removed > 0 {
+            self.save_store()?;
+        }
+        Ok(removed)
+    }
+
     /// 保存存储到文件（原子写入：先写临时文件，再 rename）
     fn save_store(&self) -> Result<()> {
         let store_path = self.memory_dir.join(Self::STORE_FILE);
@@ -621,6 +838,106 @@ impl MemoryManager {
 
         None
     }
+
+    /// Task 3: 判断是否需要自动生成摘要
+    ///
+    /// 触发条件：
+    /// 1. 内容长度超过阈值（使用字符数而非字节数）
+    /// 2. 当前没有摘要
+    fn should_auto_generate_summary(&self, content: &str, summary: &Option<String>) -> bool {
+        use super::summary_service::SummaryService;
+        summary.is_none() && SummaryService::needs_summary(content, &self.store.config)
+    }
+
+    /// Task 3: 后台异步生成摘要并回写
+    ///
+    /// 使用 tokio::spawn 在后台执行，不阻塞主流程
+    fn spawn_summary_backfill_task(&self, memory_id: String, content: String) {
+        // 检查是否在 Tokio runtime 中
+        let handle = match tokio::runtime::Handle::try_current() {
+            Ok(h) => h,
+            Err(_) => {
+                log_important!(warn, "[SummaryService] 无 Tokio runtime，跳过后台摘要生成: memory_id={}", memory_id);
+                return;
+            }
+        };
+
+        // 克隆必要的数据
+        let config = self.store.config.clone();
+        let project_path = self.project_path.clone();
+
+        log_important!(info, "[SummaryService] 已调度后台摘要生成任务: memory_id={}", memory_id);
+
+        // 在后台异步执行摘要生成
+        handle.spawn(async move {
+            use super::summary_service::SummaryService;
+            use super::registry::REGISTRY;
+
+            // 生成摘要（内部已有 5 秒超时和降级）
+            let result = SummaryService::generate_summary(&content, &config).await;
+
+            log_important!(
+                info,
+                "[SummaryService] 摘要生成完成: memory_id={}, provider={}, summary_len={}",
+                memory_id,
+                result.provider.display_name(),
+                result.summary.len()
+            );
+
+            // 通过 SharedMemoryManager 回写，确保锁一致性
+            match REGISTRY.get_or_create(&project_path) {
+                Ok(manager) => {
+                    match manager.update_memory_summary(&memory_id, result.summary) {
+                        Ok(true) => {
+                            log_important!(info, "[SummaryService] 摘要回写成功: memory_id={}", memory_id);
+                        }
+                        Ok(false) => {
+                            log_important!(warn, "[SummaryService] 摘要回写跳过（记忆不存在或已有摘要）: memory_id={}", memory_id);
+                        }
+                        Err(e) => {
+                            log_important!(warn, "[SummaryService] 摘要回写失败: memory_id={}, error={}", memory_id, e);
+                        }
+                    }
+                }
+                Err(e) => {
+                    log_important!(warn, "[SummaryService] 获取 MemoryManager 失败: memory_id={}, error={}", memory_id, e);
+                }
+            }
+        });
+    }
+
+    /// Task 3: 更新记忆的摘要字段
+    ///
+    /// 返回 Ok(true) 表示成功更新，Ok(false) 表示记忆不存在或已有摘要
+    pub fn update_memory_summary(&mut self, memory_id: &str, summary: String) -> Result<bool> {
+        // 查找目标记忆
+        let entry_idx = self.store.entries.iter().position(|e| e.id == memory_id);
+
+        match entry_idx {
+            Some(idx) => {
+                let entry = &mut self.store.entries[idx];
+
+                // 如果已有摘要，不覆盖（避免竞态）
+                if entry.summary.is_some() {
+                    log_debug!("[SummaryService] 记忆已有摘要，跳过回写: memory_id={}", memory_id);
+                    return Ok(false);
+                }
+
+                // 更新摘要
+                entry.summary = Some(summary);
+                entry.updated_at = Utc::now();
+
+                // 保存存储（原子写入）
+                self.save_store()?;
+
+                Ok(true)
+            }
+            None => {
+                log_debug!("[SummaryService] 记忆不存在，跳过回写: memory_id={}", memory_id);
+                Ok(false)
+            }
+        }
+    }
 }
 
 /// 记忆统计信息
@@ -745,6 +1062,95 @@ impl SharedMemoryManager {
         let mut manager = self.inner.write()
             .map_err(|e| anyhow::anyhow!("获取写锁失败: {}", e))?;
         manager.update_config(config)
+    }
+
+    /// Task 2 新增：获取域列表及统计（读锁）
+    pub fn get_domain_list(&self) -> Result<Vec<(String, usize)>> {
+        let manager = self.inner.read()
+            .map_err(|e| anyhow::anyhow!("获取读锁失败: {}", e))?;
+        Ok(manager.get_domain_list())
+    }
+
+    /// Task 2 新增：获取清理候选列表（读锁）
+    pub fn get_cleanup_candidates(&self) -> Result<Vec<super::vitality::CleanupCandidate>> {
+        let manager = self.inner.read()
+            .map_err(|e| anyhow::anyhow!("获取读锁失败: {}", e))?;
+        Ok(manager.get_cleanup_candidates())
+    }
+
+    /// Task 2 新增：获取活力值趋势（读锁）
+    pub fn get_vitality_trend(&self, memory_id: &str) -> Result<Option<super::types::VitalityTrend>> {
+        let manager = self.inner.read()
+            .map_err(|e| anyhow::anyhow!("获取读锁失败: {}", e))?;
+        Ok(manager.get_vitality_trend(memory_id))
+    }
+
+    /// Task 2 新增：获取记忆快照列表（读锁）
+    pub fn get_memory_snapshots(&self, memory_id: &str) -> Result<Option<Vec<MemorySnapshot>>> {
+        let manager = self.inner.read()
+            .map_err(|e| anyhow::anyhow!("获取读锁失败: {}", e))?;
+        Ok(manager.get_memory_snapshots(memory_id))
+    }
+
+    /// Task 2 新增：回滚到指定快照版本（写锁）
+    pub fn rollback_to_snapshot(&self, memory_id: &str, target_version: u32) -> Result<Option<u32>> {
+        let mut manager = self.inner.write()
+            .map_err(|e| anyhow::anyhow!("获取写锁失败: {}", e))?;
+        manager.rollback_to_snapshot(memory_id, target_version)
+    }
+
+    /// 获取内部 Arc（供 Registry 缓存 Weak 引用）
+    pub(super) fn inner_arc(&self) -> Arc<RwLock<MemoryManager>> {
+        Arc::clone(&self.inner)
+    }
+
+    /// 从已有的 Arc 创建 SharedMemoryManager（供 Registry 缓存命中时使用）
+    pub(super) fn from_arc(arc: Arc<RwLock<MemoryManager>>) -> Self {
+        Self { inner: arc }
+    }
+
+    /// 添加记忆并返回 Write Guard 判定结果（写锁）
+    pub fn add_memory_with_guard_result(
+        &self,
+        content: &str,
+        category: MemoryCategory,
+    ) -> Result<(Option<String>, super::write_guard::WriteGuardResult)> {
+        let mut manager = self.inner.write()
+            .map_err(|e| anyhow::anyhow!("获取写锁失败: {}", e))?;
+        manager.add_memory_with_guard_result(content, category)
+    }
+
+    /// 访问记忆（提升活力值，写锁）
+    pub fn access_memory(&self, memory_id: &str) -> Result<()> {
+        let mut manager = self.inner.write()
+            .map_err(|e| anyhow::anyhow!("获取写锁失败: {}", e))?;
+        manager.access_memory(memory_id)
+    }
+
+    /// 设置记忆的 URI 路径和标签（写锁）
+    pub fn classify_memory(
+        &self,
+        memory_id: &str,
+        uri_path: Option<&str>,
+        tags: Option<Vec<String>>,
+    ) -> Result<Option<String>> {
+        let mut manager = self.inner.write()
+            .map_err(|e| anyhow::anyhow!("获取写锁失败: {}", e))?;
+        manager.classify_memory(memory_id, uri_path, tags)
+    }
+
+    /// 执行清理（删除指定 ID 列表的记忆，写锁）
+    pub fn execute_cleanup(&self, ids: &[String]) -> Result<usize> {
+        let mut manager = self.inner.write()
+            .map_err(|e| anyhow::anyhow!("获取写锁失败: {}", e))?;
+        manager.execute_cleanup(ids)
+    }
+
+    /// Task 3: 更新记忆的摘要字段（写锁）
+    pub fn update_memory_summary(&self, memory_id: &str, summary: String) -> Result<bool> {
+        let mut manager = self.inner.write()
+            .map_err(|e| anyhow::anyhow!("获取写锁失败: {}", e))?;
+        manager.update_memory_summary(memory_id, summary)
     }
 }
 
