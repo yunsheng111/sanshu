@@ -303,7 +303,7 @@ mod tests {
     // ─── 辅助函数 ─────────────────────────────────────────────────────────────
 
     /// 创建测试用的临时目录和索引管理器（不依赖网络）
-    fn make_test_index_file(dir: &TempDir) -> IndexFile {
+    fn make_test_index_file(_dir: &TempDir) -> IndexFile {
         let model = "test-model";
         let dimension = 4;
         IndexFile::new(model, dimension)

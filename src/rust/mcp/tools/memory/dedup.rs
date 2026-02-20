@@ -168,6 +168,12 @@ mod tests {
             updated_at: Utc::now(),
             version: 1,
             snapshots: Vec::new(),
+            uri_path: None,
+            domain: None,
+            tags: None,
+            vitality_score: Some(1.5),
+            last_accessed_at: Some(Utc::now()),
+            summary: None,
         }
     }
 

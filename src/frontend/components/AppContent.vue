@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useMessage } from 'naive-ui'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { invoke } from '@tauri-apps/api/core'
 import { useAcemcpSync } from '../composables/useAcemcpSync'
 import { setupExitWarningListener } from '../composables/useExitWarning'
 import { useKeyboard } from '../composables/useKeyboard'
@@ -101,6 +102,9 @@ const {
 // 记录重新同步按钮的本地 loading 状态
 const resyncLoading = ref(false)
 
+// 非 MCP 弹窗模式下的降级项目路径（通过 Tauri 获取当前工作目录）
+const fallbackProjectPath = ref<string | null>(null)
+
 // 是否启用 sou 代码搜索工具
 const souEnabled = computed(() => mcpTools.value.some(tool => tool.id === 'sou' && tool.enabled))
 // 是否启用提示词增强工具
@@ -174,6 +178,13 @@ onMounted(() => {
 
   // 加载 MCP 工具配置（用于检测 sou 是否启用）
   loadMcpTools()
+
+  // 非 MCP 弹窗模式下，获取当前工作目录作为降级项目路径
+  if (!props.showMcpPopup) {
+    invoke<string>('get_current_dir')
+      .then((dir) => { fallbackProjectPath.value = dir })
+      .catch(() => { fallbackProjectPath.value = null })
+  }
 })
 
 onUnmounted(() => {
@@ -352,7 +363,7 @@ onUnmounted(() => {
       v-else
       :app-config="props.appConfig"
       :active-tab="activeTab"
-      :project-root-path="null"
+      :project-root-path="fallbackProjectPath"
       @theme-change="$emit('themeChange', $event)"
       @toggle-always-on-top="$emit('toggleAlwaysOnTop')"
       @toggle-audio-notification="$emit('toggleAudioNotification')"

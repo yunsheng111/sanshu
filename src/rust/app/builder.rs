@@ -4,6 +4,7 @@ use crate::app::{setup::setup_application, commands::*};
 use crate::mcp::commands::{
     get_memory_list, get_memory_stats, get_memory_config, save_memory_config,
     deduplicate_memories, preview_similarity, delete_memory,
+    search_memories, update_memory, export_memories, get_domain_list,
     get_enhance_config, save_enhance_config,
     get_sou_config, save_sou_config,
 };
@@ -134,6 +135,7 @@ pub fn build_tauri_app() -> Builder<tauri::Wry> {
 
             // 配置管理命令
             get_config_file_path,
+            get_current_dir,
 
             // Telegram 命令
             get_telegram_config,
@@ -195,6 +197,10 @@ pub fn build_tauri_app() -> Builder<tauri::Wry> {
             deduplicate_memories,
             preview_similarity,
             delete_memory,
+            search_memories,
+            update_memory,
+            export_memories,
+            get_domain_list,
 
             // 提示词增强配置命令
             get_enhance_config,

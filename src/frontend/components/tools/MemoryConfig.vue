@@ -365,14 +365,14 @@ function getCategoryIcon(category: string): string {
   return icons[category] || 'i-carbon-document'
 }
 
-function getCategoryColor(category: string): string {
-  const colors: Record<string, string> = {
-    '规范': 'text-blue-500',
-    '偏好': 'text-purple-500',
-    '模式': 'text-green-500',
-    '背景': 'text-orange-500',
+function getCategoryBgClass(category: string): string {
+  const classes: Record<string, string> = {
+    '规范': 'category-badge--rule',
+    '偏好': 'category-badge--preference',
+    '模式': 'category-badge--pattern',
+    '背景': 'category-badge--context',
   }
-  return colors[category] || 'text-gray-500'
+  return classes[category] || ''
 }
 
 // ============ 生命周期 ============
@@ -396,43 +396,40 @@ onMounted(async () => {
 <template>
   <div class="memory-config">
     <!-- 无项目路径提示 -->
-    <div v-if="!projectPath" class="empty-state">
-      <div class="i-carbon-folder-off text-5xl mb-3 opacity-20" />
-      <div class="text-sm opacity-60">
-        请先在 MCP 工具中指定项目路径
+    <div v-if="!projectPath" class="empty-state" role="status">
+      <div class="empty-icon-container">
+        <div class="i-carbon-folder-off" aria-hidden="true" />
       </div>
+      <div class="empty-text">未指定项目路径</div>
+      <div class="empty-hint">请先在 MCP 工具中指定项目路径</div>
     </div>
 
     <template v-else>
       <n-tabs v-model:value="currentTab" type="line" animated>
         <!-- 配置 Tab -->
         <n-tab-pane name="config" tab="配置">
-          <n-scrollbar class="tab-scrollbar">
-            <n-space vertical size="large" class="tab-content">
+          <div class="tab-content">
+            <div class="config-sections">
               <!-- 去重设置 -->
               <ConfigSection title="去重设置" description="配置相似度检测阈值和自动去重行为">
-                <n-space vertical size="medium">
+                <div class="dedup-settings">
                   <!-- 相似度阈值滑块 -->
-                  <n-form-item label="相似度阈值">
-                    <div class="w-full">
-                      <div class="flex items-center gap-4">
-                        <n-slider
-                          v-model:value="thresholdPercent"
-                          :min="50"
-                          :max="95"
-                          :step="5"
-                          :marks="{ 50: '50%', 70: '70%', 95: '95%' }"
-                          class="flex-1"
-                        />
-                        <n-tag type="info" :bordered="false">
-                          {{ thresholdPercent }}%
-                        </n-tag>
-                      </div>
-                      <div class="text-xs text-gray-500 mt-2">
-                        超过此相似度的内容将被视为重复。建议值：70%
-                      </div>
+                  <div class="threshold-control">
+                    <div class="threshold-header">
+                      <span class="threshold-label">相似度阈值</span>
+                      <span class="threshold-value">{{ thresholdPercent }}%</span>
                     </div>
-                  </n-form-item>
+                    <n-slider
+                      v-model:value="thresholdPercent"
+                      :min="50"
+                      :max="95"
+                      :step="5"
+                      :marks="{ 50: '50%', 70: '70%', 95: '95%' }"
+                    />
+                    <div class="threshold-hint">
+                      超过此相似度的内容将被视为重复。建议值：70%
+                    </div>
+                  </div>
 
                   <!-- 开关选项 -->
                   <div class="switch-group">
@@ -451,55 +448,70 @@ onMounted(async () => {
                       <n-switch v-model:value="config.enable_dedup" />
                     </div>
                   </div>
-                </n-space>
+                </div>
               </ConfigSection>
 
               <!-- 快捷操作 -->
               <ConfigSection title="快捷操作" :no-card="true">
-                <n-space>
-                  <n-button type="primary" :loading="configSaving" @click="saveConfig">
+                <div class="quick-actions">
+                  <n-button type="primary" :loading="configSaving" class="action-btn" @click="saveConfig">
                     <template #icon>
-                      <div class="i-carbon-save" />
+                      <div class="i-carbon-save" aria-hidden="true" />
                     </template>
                     保存配置
                   </n-button>
-                  <n-button secondary :loading="dedupLoading" @click="executeDeduplicate">
+                  <n-button secondary :loading="dedupLoading" class="action-btn" @click="executeDeduplicate">
                     <template #icon>
-                      <div class="i-carbon-clean" />
+                      <div class="i-carbon-clean" aria-hidden="true" />
                     </template>
                     立即整理
                   </n-button>
-                  <n-button secondary :loading="exportLoading" @click="exportMemories">
+                  <n-button secondary :loading="exportLoading" class="action-btn" @click="exportMemories">
                     <template #icon>
-                      <div class="i-carbon-export" />
+                      <div class="i-carbon-export" aria-hidden="true" />
                     </template>
                     导出记忆
                   </n-button>
-                </n-space>
+                </div>
               </ConfigSection>
 
               <!-- 统计信息 -->
               <ConfigSection title="统计信息" :no-card="true">
                 <div class="stats-grid">
-                  <div class="stat-card">
-                    <div class="stat-value">{{ stats.total }}</div>
-                    <div class="stat-label">总计</div>
+                  <div class="stat-card stat-card--total">
+                    <div class="stat-accent" />
+                    <div class="stat-body">
+                      <div class="stat-value stat-value--total">{{ stats.total }}</div>
+                      <div class="stat-label">总计</div>
+                    </div>
                   </div>
-                  <div class="stat-card">
-                    <div class="stat-value text-blue-500">{{ stats.rules }}</div>
-                    <div class="stat-label">规范</div>
+                  <div class="stat-card stat-card--rule">
+                    <div class="stat-accent stat-accent--rule" />
+                    <div class="stat-body">
+                      <div class="stat-value stat-value--rule">{{ stats.rules }}</div>
+                      <div class="stat-label">规范</div>
+                    </div>
                   </div>
-                  <div class="stat-card">
-                    <div class="stat-value text-purple-500">{{ stats.preferences }}</div>
-                    <div class="stat-label">偏好</div>
+                  <div class="stat-card stat-card--preference">
+                    <div class="stat-accent stat-accent--preference" />
+                    <div class="stat-body">
+                      <div class="stat-value stat-value--preference">{{ stats.preferences }}</div>
+                      <div class="stat-label">偏好</div>
+                    </div>
                   </div>
-                  <div class="stat-card">
-                    <div class="stat-value text-green-500">{{ stats.patterns }}</div>
-                    <div class="stat-label">模式</div>
+                  <div class="stat-card stat-card--pattern">
+                    <div class="stat-accent stat-accent--pattern" />
+                    <div class="stat-body">
+                      <div class="stat-value stat-value--pattern">{{ stats.patterns }}</div>
+                      <div class="stat-label">模式</div>
+                    </div>
                   </div>
-                  <div class="stat-card">
-                    <div class="stat-value text-orange-500">{{ stats.contexts }}</div>
-                    <div class="stat-label">背景</div>
+                  <div class="stat-card stat-card--context">
+                    <div class="stat-accent stat-accent--context" />
+                    <div class="stat-body">
+                      <div class="stat-value stat-value--context">{{ stats.contexts }}</div>
+                      <div class="stat-label">背景</div>
+                    </div>
                   </div>
                 </div>
               </ConfigSection>
@@ -507,22 +519,25 @@ onMounted(async () => {
               <!-- 去重结果 -->
               <n-collapse-transition :show="lastDedupResult !== null">
                 <ConfigSection v-if="lastDedupResult" title="上次整理结果" :no-card="true">
-                  <n-alert type="success" :bordered="false">
-                    <template #icon>
-                      <div class="i-carbon-checkmark-outline" />
-                    </template>
-                    移除 <strong>{{ lastDedupResult.removed_count }}</strong> 条重复记忆，
-                    保留 <strong>{{ lastDedupResult.remaining_count }}</strong> 条
-                  </n-alert>
+                  <div class="dedup-result">
+                    <div class="dedup-result-icon">
+                      <div class="i-carbon-checkmark-outline" aria-hidden="true" />
+                    </div>
+                    <div class="dedup-result-body">
+                      <div class="dedup-result-text">
+                        移除 <strong>{{ lastDedupResult.removed_count }}</strong> 条重复记忆，
+                        保留 <strong>{{ lastDedupResult.remaining_count }}</strong> 条
+                      </div>
+                    </div>
+                  </div>
                 </ConfigSection>
               </n-collapse-transition>
-            </n-space>
-          </n-scrollbar>
+            </div>
+          </div>
         </n-tab-pane>
 
         <!-- 记忆列表 Tab -->
         <n-tab-pane name="list" tab="记忆列表">
-          <n-scrollbar class="tab-scrollbar">
             <MemoryList
               ref="memoryListRef"
               :project-root-path="projectPath"
@@ -530,12 +545,10 @@ onMounted(async () => {
               @refresh="loadMemories"
               @stats-updated="handleStatsUpdate"
             />
-          </n-scrollbar>
         </n-tab-pane>
 
         <!-- 搜索 Tab -->
         <n-tab-pane name="search" tab="搜索">
-          <n-scrollbar class="tab-scrollbar">
             <div class="tab-content">
               <MemorySearch
                 ref="memorySearchRef"
@@ -544,81 +557,89 @@ onMounted(async () => {
                 @delete="handleSearchDelete"
               />
             </div>
-          </n-scrollbar>
         </n-tab-pane>
 
         <!-- 相似度预览 Tab -->
         <n-tab-pane name="preview" tab="相似度预览">
-          <n-scrollbar class="tab-scrollbar">
-            <n-space vertical size="large" class="tab-content">
-              <ConfigSection title="输入检测" description="输入内容检测与现有记忆的相似度">
-                <n-space vertical size="medium">
-                  <n-input
-                    v-model:value="previewContent"
-                    type="textarea"
-                    :rows="3"
-                    placeholder="输入要检测的内容..."
-                    aria-label="待检测内容输入框"
-                  />
-                  <n-button
-                    type="primary"
-                    :loading="previewLoading"
-                    :disabled="!previewContent.trim()"
-                    aria-describedby="similarity-result"
-                    @click="previewSimilarity"
-                  >
-                    <template #icon>
-                      <div class="i-carbon-search" />
-                    </template>
-                    检测相似度
-                  </n-button>
-                </n-space>
-              </ConfigSection>
-
-              <!-- 检测结果 -->
-              <n-collapse-transition :show="previewResult !== null">
-                <ConfigSection v-if="previewResult" title="检测结果" :no-card="true">
-                  <div class="preview-result">
-                    <!-- 相似度指示器 -->
-                    <div class="similarity-indicator">
-                      <div
-                        class="similarity-bar"
-                        :style="{ width: `${previewResult.similarity * 100}%` }"
-                        :class="{
-                          'bg-red-500': previewResult.is_duplicate,
-                          'bg-green-500': !previewResult.is_duplicate,
-                        }"
-                      />
-                      <div class="similarity-text">
-                        相似度: {{ (previewResult.similarity * 100).toFixed(1) }}%
-                        <span class="threshold-text">
-                          (阈值: {{ (previewResult.threshold * 100).toFixed(0) }}%)
-                        </span>
-                      </div>
-                    </div>
-
-                    <!-- 结果状态 -->
-                    <n-alert
-                      :type="previewResult.is_duplicate ? 'warning' : 'success'"
-                      :bordered="false"
-                      class="mt-4"
+            <div class="tab-content">
+              <div class="preview-sections">
+                <ConfigSection title="输入检测" description="输入内容检测与现有记忆的相似度">
+                  <div class="preview-input-group">
+                    <n-input
+                      v-model:value="previewContent"
+                      type="textarea"
+                      :rows="3"
+                      placeholder="输入要检测的内容..."
+                      aria-label="待检测内容输入框"
+                      class="preview-textarea"
+                    />
+                    <n-button
+                      type="primary"
+                      :loading="previewLoading"
+                      :disabled="!previewContent.trim()"
+                      aria-describedby="similarity-result"
+                      @click="previewSimilarity"
                     >
                       <template #icon>
-                        <div :class="previewResult.is_duplicate ? 'i-carbon-warning' : 'i-carbon-checkmark'" />
+                        <div class="i-carbon-search" aria-hidden="true" />
                       </template>
-                      {{ previewResult.is_duplicate ? '检测到相似内容，添加时将被拒绝' : '未检测到相似内容，可以添加' }}
-                    </n-alert>
-
-                    <!-- 匹配的内容 -->
-                    <div v-if="previewResult.matched_content" class="matched-content mt-4">
-                      <div class="matched-label">最相似的记忆:</div>
-                      <div class="matched-text">{{ previewResult.matched_content }}</div>
-                    </div>
+                      检测相似度
+                    </n-button>
                   </div>
                 </ConfigSection>
-              </n-collapse-transition>
-            </n-space>
-          </n-scrollbar>
+
+                <!-- 检测结果 -->
+                <n-collapse-transition :show="previewResult !== null">
+                  <ConfigSection v-if="previewResult" title="检测结果" :no-card="true">
+                    <div class="preview-result">
+                      <!-- 相似度指示器 -->
+                      <div class="similarity-indicator">
+                        <div class="similarity-track">
+                          <div
+                            class="similarity-bar"
+                            :class="{
+                              'similarity-bar--duplicate': previewResult.is_duplicate,
+                              'similarity-bar--safe': !previewResult.is_duplicate,
+                            }"
+                            :style="{ width: `${previewResult.similarity * 100}%` }"
+                          />
+                        </div>
+                        <div class="similarity-info">
+                          <span class="similarity-score" :class="{ 'similarity-score--duplicate': previewResult.is_duplicate }">
+                            {{ (previewResult.similarity * 100).toFixed(1) }}%
+                          </span>
+                          <span class="similarity-threshold">
+                            阈值 {{ (previewResult.threshold * 100).toFixed(0) }}%
+                          </span>
+                        </div>
+                      </div>
+
+                      <!-- 结果状态 -->
+                      <div class="similarity-status" :class="{ 'similarity-status--duplicate': previewResult.is_duplicate }">
+                        <div class="similarity-status-icon">
+                          <div :class="previewResult.is_duplicate ? 'i-carbon-warning' : 'i-carbon-checkmark'" aria-hidden="true" />
+                        </div>
+                        <span class="similarity-status-text">
+                          {{ previewResult.is_duplicate ? '检测到相似内容，添加时将被拒绝' : '未检测到相似内容，可以添加' }}
+                        </span>
+                      </div>
+
+                      <!-- 匹配的内容 -->
+                      <div v-if="previewResult.matched_content" class="matched-content">
+                        <div class="matched-accent" />
+                        <div class="matched-body">
+                          <div class="matched-label">
+                            <div class="i-carbon-link" aria-hidden="true" />
+                            最相似的记忆
+                          </div>
+                          <div class="matched-text">{{ previewResult.matched_content }}</div>
+                        </div>
+                      </div>
+                    </div>
+                  </ConfigSection>
+                </n-collapse-transition>
+              </div>
+            </div>
         </n-tab-pane>
       </n-tabs>
     </template>
@@ -631,12 +652,12 @@ onMounted(async () => {
       :style="{ width: '600px' }"
       :mask-closable="false"
     >
-      <n-space vertical size="medium">
+      <div class="edit-modal-content">
         <div v-if="editingMemory" class="edit-info">
-          <div class="edit-category">
-            <div :class="[getCategoryIcon(editingMemory.category), getCategoryColor(editingMemory.category)]" />
-            <span>{{ editingMemory.category }}</span>
-          </div>
+          <span :class="['category-badge', getCategoryBgClass(editingMemory.category)]">
+            <div :class="getCategoryIcon(editingMemory.category)" aria-hidden="true" />
+            {{ editingMemory.category }}
+          </span>
           <span class="edit-time">{{ formatDate(editingMemory.created_at) }}</span>
         </div>
 
@@ -646,18 +667,19 @@ onMounted(async () => {
           :rows="6"
           placeholder="输入新内容..."
           :disabled="editSaving"
+          class="edit-textarea"
         />
-      </n-space>
+      </div>
 
       <template #footer>
-        <n-space justify="end">
+        <div class="edit-footer">
           <n-button @click="closeEditModal" :disabled="editSaving">
             取消
           </n-button>
           <n-button type="primary" :loading="editSaving" @click="saveEdit">
             保存
           </n-button>
-        </n-space>
+        </div>
       </template>
     </n-modal>
   </div>
@@ -668,45 +690,147 @@ onMounted(async () => {
   min-height: 400px;
 }
 
-.tab-scrollbar {
-  max-height: 500px;
-}
-
 .tab-content {
   padding: 16px 4px;
 }
 
-/* 空状态 */
-.empty-state,
-.empty-list {
+.config-sections,
+.preview-sections {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* ============ 空状态 ============ */
+.empty-state {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  min-height: 200px;
-  color: var(--color-on-surface-muted, #9ca3af);
+  min-height: 280px;
+  gap: 6px;
 }
 
-/* 开关组 */
+.empty-icon-container {
+  width: 56px;
+  height: 56px;
+  border-radius: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, rgba(20, 184, 166, 0.06), rgba(59, 130, 246, 0.04));
+  border: 1px dashed rgba(20, 184, 166, 0.2);
+  margin-bottom: 4px;
+}
+
+:root.dark .empty-icon-container {
+  background: linear-gradient(135deg, rgba(20, 184, 166, 0.1), rgba(59, 130, 246, 0.08));
+  border-color: rgba(20, 184, 166, 0.25);
+}
+
+.empty-icon-container [class^="i-carbon-"] {
+  font-size: 26px;
+  color: rgba(20, 184, 166, 0.4);
+}
+
+.empty-text {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-on-surface-secondary, #6b7280);
+  opacity: 0.7;
+}
+
+:root.dark .empty-text {
+  color: #9ca3af;
+}
+
+.empty-hint {
+  font-size: 11px;
+  color: var(--color-on-surface-secondary, #9ca3af);
+  opacity: 0.5;
+}
+
+/* ============ 去重设置 ============ */
+.dedup-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.threshold-control {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.threshold-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.threshold-label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-on-surface, #111827);
+}
+
+:root.dark .threshold-label {
+  color: #f3f4f6;
+}
+
+.threshold-value {
+  font-size: 14px;
+  font-weight: 700;
+  color: rgba(20, 184, 166, 0.9);
+  font-variant-numeric: tabular-nums;
+  padding: 2px 10px;
+  border-radius: 6px;
+  background: rgba(20, 184, 166, 0.08);
+}
+
+:root.dark .threshold-value {
+  background: rgba(20, 184, 166, 0.12);
+}
+
+.threshold-hint {
+  font-size: 11px;
+  color: var(--color-on-surface-secondary, #9ca3af);
+  margin-top: 2px;
+}
+
+/* ============ 开关组 ============ */
 .switch-group {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
 }
 
 .switch-item {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 16px;
-  border-radius: 8px;
-  background: var(--color-container, rgba(255, 255, 255, 0.5));
-  border: 1px solid var(--color-border, rgba(128, 128, 128, 0.15));
+  padding: 14px 18px;
+  border-radius: 10px;
+  background: var(--color-container, rgba(255, 255, 255, 0.6));
+  border: 1px solid var(--color-border, rgba(128, 128, 128, 0.12));
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.switch-item:hover {
+  border-color: rgba(20, 184, 166, 0.25);
+  background: var(--color-container, rgba(255, 255, 255, 0.8));
+  box-shadow: 0 2px 8px rgba(20, 184, 166, 0.05);
 }
 
 :root.dark .switch-item {
-  background: rgba(24, 24, 28, 0.5);
-  border-color: rgba(255, 255, 255, 0.08);
+  background: rgba(28, 28, 34, 0.5);
+  border-color: rgba(255, 255, 255, 0.06);
+}
+
+:root.dark .switch-item:hover {
+  background: rgba(32, 32, 38, 0.6);
+  border-color: rgba(20, 184, 166, 0.3);
 }
 
 .switch-info {
@@ -720,132 +844,253 @@ onMounted(async () => {
 }
 
 :root.dark .switch-label {
-  color: #e5e7eb;
+  color: #f3f4f6;
 }
 
 .switch-desc {
   font-size: 12px;
   color: var(--color-on-surface-secondary, #6b7280);
-  margin-top: 2px;
+  margin-top: 3px;
+  line-height: 1.4;
 }
 
 :root.dark .switch-desc {
   color: #9ca3af;
 }
 
-/* 统计网格 */
+/* ============ 快捷操作 ============ */
+.quick-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.action-btn {
+  transition: all 0.2s ease;
+}
+
+/* ============ 统计网格 ============ */
 .stats-grid {
   display: grid;
   grid-template-columns: repeat(5, 1fr);
-  gap: 12px;
+  gap: 10px;
 }
 
 .stat-card {
-  text-align: center;
-  padding: 12px;
-  border-radius: 8px;
-  background: var(--color-container, rgba(255, 255, 255, 0.5));
-  border: 1px solid var(--color-border, rgba(128, 128, 128, 0.15));
+  display: flex;
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--color-container, rgba(255, 255, 255, 0.6));
+  border: 1px solid var(--color-border, rgba(128, 128, 128, 0.12));
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.stat-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+  border-color: rgba(20, 184, 166, 0.25);
 }
 
 :root.dark .stat-card {
-  background: rgba(24, 24, 28, 0.5);
-  border-color: rgba(255, 255, 255, 0.08);
+  background: rgba(28, 28, 34, 0.5);
+  border-color: rgba(255, 255, 255, 0.06);
+}
+
+:root.dark .stat-card:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  border-color: rgba(20, 184, 166, 0.3);
+}
+
+/* 左侧色条 */
+.stat-accent {
+  width: 3px;
+  flex-shrink: 0;
+  background: linear-gradient(180deg, rgba(20, 184, 166, 0.6), rgba(20, 184, 166, 0.3));
+}
+
+.stat-accent--rule {
+  background: linear-gradient(180deg, #3b82f6, #60a5fa);
+}
+
+.stat-accent--preference {
+  background: linear-gradient(180deg, #a855f7, #c084fc);
+}
+
+.stat-accent--pattern {
+  background: linear-gradient(180deg, #22c55e, #4ade80);
+}
+
+.stat-accent--context {
+  background: linear-gradient(180deg, #f97316, #fb923c);
+}
+
+.stat-body {
+  flex: 1;
+  text-align: center;
+  padding: 14px 8px;
 }
 
 .stat-value {
-  font-size: 24px;
-  font-weight: 600;
+  font-size: 26px;
+  font-weight: 700;
   color: var(--color-on-surface, #111827);
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
 }
 
 :root.dark .stat-value {
-  color: #e5e7eb;
+  color: #f3f4f6;
+}
+
+.stat-value--total {
+  color: rgba(20, 184, 166, 0.9);
+}
+
+:root.dark .stat-value--total {
+  color: rgba(45, 212, 191, 0.9);
+}
+
+.stat-value--rule {
+  color: #3b82f6;
+}
+
+:root.dark .stat-value--rule {
+  color: #60a5fa;
+}
+
+.stat-value--preference {
+  color: #a855f7;
+}
+
+:root.dark .stat-value--preference {
+  color: #c084fc;
+}
+
+.stat-value--pattern {
+  color: #22c55e;
+}
+
+:root.dark .stat-value--pattern {
+  color: #4ade80;
+}
+
+.stat-value--context {
+  color: #f97316;
+}
+
+:root.dark .stat-value--context {
+  color: #fb923c;
 }
 
 .stat-label {
   font-size: 12px;
   color: var(--color-on-surface-secondary, #6b7280);
-  margin-top: 4px;
-}
-
-/* 分类头部 */
-.category-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+  margin-top: 6px;
   font-weight: 500;
 }
 
-/* 记忆列表 */
-.memory-list {
+/* ============ 去重结果 ============ */
+.dedup-result {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 18px;
+  border-radius: 12px;
+  background: rgba(34, 197, 94, 0.06);
+  border: 1px solid rgba(34, 197, 94, 0.15);
+}
+
+:root.dark .dedup-result {
+  background: rgba(34, 197, 94, 0.1);
+  border-color: rgba(34, 197, 94, 0.2);
+}
+
+.dedup-result-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(34, 197, 94, 0.12);
+  flex-shrink: 0;
+}
+
+:root.dark .dedup-result-icon {
+  background: rgba(34, 197, 94, 0.18);
+}
+
+.dedup-result-icon [class^="i-carbon-"] {
+  font-size: 18px;
+  color: #16a34a;
+}
+
+:root.dark .dedup-result-icon [class^="i-carbon-"] {
+  color: #4ade80;
+}
+
+.dedup-result-body {
+  flex: 1;
+}
+
+.dedup-result-text {
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--color-on-surface, #374151);
+}
+
+:root.dark .dedup-result-text {
+  color: #d1d5db;
+}
+
+.dedup-result-text strong {
+  color: #16a34a;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+:root.dark .dedup-result-text strong {
+  color: #4ade80;
+}
+
+/* ============ 相似度预览 ============ */
+.preview-input-group {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.preview-textarea {
+  /* 继承 Naive UI 默认样式 */
+}
+
+.preview-result {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px;
+  border-radius: 12px;
+  background: var(--color-container, rgba(255, 255, 255, 0.6));
+  border: 1px solid var(--color-border, rgba(128, 128, 128, 0.12));
+}
+
+:root.dark .preview-result {
+  background: rgba(28, 28, 34, 0.5);
+  border-color: rgba(255, 255, 255, 0.06);
+}
+
+/* 相似度进度条 */
+.similarity-indicator {
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 
-.memory-item {
-  padding: 12px;
-  border-radius: 8px;
-  background: var(--color-container, rgba(255, 255, 255, 0.5));
-  border: 1px solid var(--color-border, rgba(128, 128, 128, 0.15));
-}
-
-:root.dark .memory-item {
-  background: rgba(24, 24, 28, 0.5);
-  border-color: rgba(255, 255, 255, 0.08);
-}
-
-.memory-content {
-  font-size: 13px;
-  line-height: 1.5;
-  color: var(--color-on-surface, #111827);
-  word-break: break-word;
-}
-
-:root.dark .memory-content {
-  color: #e5e7eb;
-}
-
-.memory-meta {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-top: 8px;
-  padding-top: 8px;
-  border-top: 1px solid var(--color-border, rgba(128, 128, 128, 0.1));
-}
-
-.memory-time {
-  font-size: 11px;
-  color: var(--color-on-surface-secondary, #9ca3af);
-}
-
-/* 骨架屏 */
-.skeleton-list {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-/* 相似度预览结果 */
-.preview-result {
-  padding: 16px;
-  border-radius: 8px;
-  background: var(--color-container, rgba(255, 255, 255, 0.5));
-  border: 1px solid var(--color-border, rgba(128, 128, 128, 0.15));
-}
-
-:root.dark .preview-result {
-  background: rgba(24, 24, 28, 0.5);
-  border-color: rgba(255, 255, 255, 0.08);
-}
-
-.similarity-indicator {
+.similarity-track {
   position: relative;
-  height: 24px;
-  border-radius: 12px;
-  background: var(--color-border, rgba(128, 128, 128, 0.2));
+  height: 8px;
+  border-radius: 4px;
+  background: var(--color-border, rgba(128, 128, 128, 0.15));
   overflow: hidden;
 }
 
@@ -854,71 +1099,262 @@ onMounted(async () => {
   top: 0;
   left: 0;
   height: 100%;
-  transition: width 0.3s ease;
+  border-radius: 4px;
+  transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-.similarity-text {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
+.similarity-bar--duplicate {
+  background: linear-gradient(90deg, #ef4444, #f97316);
+}
+
+.similarity-bar--safe {
+  background: linear-gradient(90deg, #22c55e, #14b8a6);
+}
+
+.similarity-info {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.similarity-score {
+  font-size: 18px;
+  font-weight: 700;
+  color: #16a34a;
+  font-variant-numeric: tabular-nums;
+}
+
+.similarity-score--duplicate {
+  color: #dc2626;
+}
+
+:root.dark .similarity-score {
+  color: #4ade80;
+}
+
+:root.dark .similarity-score--duplicate {
+  color: #f87171;
+}
+
+.similarity-threshold {
   font-size: 12px;
-  font-weight: 500;
-  color: white;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  color: var(--color-on-surface-secondary, #9ca3af);
+  font-variant-numeric: tabular-nums;
 }
 
-.threshold-text {
-  opacity: 0.8;
+/* 状态提示 */
+.similarity-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  border-radius: 10px;
+  background: rgba(34, 197, 94, 0.06);
+  border: 1px solid rgba(34, 197, 94, 0.12);
 }
 
-.matched-content {
-  padding: 12px;
+.similarity-status--duplicate {
+  background: rgba(239, 68, 68, 0.06);
+  border-color: rgba(239, 68, 68, 0.12);
+}
+
+:root.dark .similarity-status {
+  background: rgba(34, 197, 94, 0.1);
+  border-color: rgba(34, 197, 94, 0.18);
+}
+
+:root.dark .similarity-status--duplicate {
+  background: rgba(239, 68, 68, 0.1);
+  border-color: rgba(239, 68, 68, 0.18);
+}
+
+.similarity-status-icon {
+  width: 28px;
+  height: 28px;
   border-radius: 8px;
-  background: var(--color-border, rgba(128, 128, 128, 0.1));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(34, 197, 94, 0.1);
+  flex-shrink: 0;
+}
+
+.similarity-status--duplicate .similarity-status-icon {
+  background: rgba(239, 68, 68, 0.1);
+}
+
+:root.dark .similarity-status-icon {
+  background: rgba(34, 197, 94, 0.15);
+}
+
+:root.dark .similarity-status--duplicate .similarity-status-icon {
+  background: rgba(239, 68, 68, 0.15);
+}
+
+.similarity-status-icon [class^="i-carbon-"] {
+  font-size: 14px;
+  color: #16a34a;
+}
+
+.similarity-status--duplicate .similarity-status-icon [class^="i-carbon-"] {
+  color: #dc2626;
+}
+
+:root.dark .similarity-status-icon [class^="i-carbon-"] {
+  color: #4ade80;
+}
+
+:root.dark .similarity-status--duplicate .similarity-status-icon [class^="i-carbon-"] {
+  color: #f87171;
+}
+
+.similarity-status-text {
+  font-size: 13px;
+  color: var(--color-on-surface, #374151);
+  font-weight: 500;
+}
+
+:root.dark .similarity-status-text {
+  color: #d1d5db;
+}
+
+/* 匹配内容 - 带左侧色条 */
+.matched-content {
+  display: flex;
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--color-border, rgba(128, 128, 128, 0.06));
+  border: 1px solid var(--color-border, rgba(128, 128, 128, 0.08));
+}
+
+:root.dark .matched-content {
+  background: rgba(255, 255, 255, 0.03);
+  border-color: rgba(255, 255, 255, 0.06);
+}
+
+.matched-accent {
+  width: 3px;
+  flex-shrink: 0;
+  background: linear-gradient(180deg, rgba(251, 191, 36, 0.6), rgba(251, 191, 36, 0.3));
+}
+
+.matched-body {
+  flex: 1;
+  padding: 12px 16px;
 }
 
 .matched-label {
-  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
   color: var(--color-on-surface-secondary, #6b7280);
-  margin-bottom: 4px;
+  margin-bottom: 6px;
+  font-weight: 600;
+}
+
+.matched-label [class^="i-carbon-"] {
+  font-size: 12px;
+  color: rgba(251, 191, 36, 0.6);
 }
 
 .matched-text {
   font-size: 13px;
+  line-height: 1.7;
   color: var(--color-on-surface, #111827);
+  word-break: break-word;
 }
 
 :root.dark .matched-text {
   color: #e5e7eb;
 }
 
-/* 编辑模态框 */
+/* ============ 编辑模态框 ============ */
+.edit-modal-content {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
 .edit-info {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 12px;
-  border-radius: 6px;
-  background: var(--color-container, rgba(255, 255, 255, 0.5));
-  border: 1px solid var(--color-border, rgba(128, 128, 128, 0.15));
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: var(--color-container, rgba(255, 255, 255, 0.6));
+  border: 1px solid var(--color-border, rgba(128, 128, 128, 0.12));
 }
 
 :root.dark .edit-info {
-  background: rgba(24, 24, 28, 0.5);
-  border-color: rgba(255, 255, 255, 0.08);
+  background: rgba(28, 28, 34, 0.5);
+  border-color: rgba(255, 255, 255, 0.06);
 }
 
-.edit-category {
-  display: flex;
+/* 分类标签 pill */
+.category-badge {
+  display: inline-flex;
   align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  font-weight: 500;
+  gap: 4px;
+  padding: 2px 10px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.category-badge--rule {
+  background: rgba(59, 130, 246, 0.08);
+  color: #3b82f6;
+}
+
+.category-badge--preference {
+  background: rgba(168, 85, 247, 0.08);
+  color: #a855f7;
+}
+
+.category-badge--pattern {
+  background: rgba(34, 197, 94, 0.08);
+  color: #22c55e;
+}
+
+.category-badge--context {
+  background: rgba(249, 115, 22, 0.08);
+  color: #f97316;
+}
+
+:root.dark .category-badge--rule {
+  background: rgba(59, 130, 246, 0.15);
+  color: #60a5fa;
+}
+
+:root.dark .category-badge--preference {
+  background: rgba(168, 85, 247, 0.15);
+  color: #c084fc;
+}
+
+:root.dark .category-badge--pattern {
+  background: rgba(34, 197, 94, 0.15);
+  color: #4ade80;
+}
+
+:root.dark .category-badge--context {
+  background: rgba(249, 115, 22, 0.15);
+  color: #fb923c;
 }
 
 .edit-time {
   font-size: 11px;
   color: var(--color-on-surface-secondary, #9ca3af);
+  font-variant-numeric: tabular-nums;
+}
+
+.edit-textarea {
+  /* 继承 Naive UI 默认样式 */
+}
+
+.edit-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }
 </style>

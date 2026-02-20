@@ -886,6 +886,50 @@ pub async fn get_config_file_path(app: AppHandle) -> Result<String, String> {
     Ok(normalized_path)
 }
 
+/// 检测项目根目录
+///
+/// 从当前工作目录开始向上递归查找 .git 或 package.json，
+/// 找不到时降级返回当前工作目录
+#[tauri::command]
+pub async fn get_current_dir() -> Result<String, String> {
+    let cwd = std::env::current_dir()
+        .map_err(|e| format!("获取当前工作目录失败: {}", e))?;
+
+    // 递归向上查找项目根目录标识
+    let project_root = detect_project_root(&cwd).unwrap_or(cwd);
+    let normalized = normalize_path_display(&project_root);
+    Ok(normalized)
+}
+
+/// 递归向上查找项目根目录
+///
+/// 查找顺序：.git > package.json > Cargo.toml > pyproject.toml
+pub(crate) fn detect_project_root(start_path: &std::path::Path) -> Option<std::path::PathBuf> {
+    let mut current = start_path;
+
+    loop {
+        // 检查项目根目录标识文件
+        if current.join(".git").exists() {
+            return Some(current.to_path_buf());
+        }
+        if current.join("package.json").exists() {
+            return Some(current.to_path_buf());
+        }
+        if current.join("Cargo.toml").exists() {
+            return Some(current.to_path_buf());
+        }
+        if current.join("pyproject.toml").exists() {
+            return Some(current.to_path_buf());
+        }
+
+        // 向上一级目录
+        match current.parent() {
+            Some(parent) => current = parent,
+            None => return None, // 已到根目录，未找到项目标识
+        }
+    }
+}
+
 /// 跨平台路径显示规范化
 fn normalize_path_display(path: &std::path::Path) -> String {
     // 如果文件存在，尝试获取规范路径

@@ -270,7 +270,7 @@ mod tests {
     #[test]
     fn test_rule_engine_default_has_10_rules() {
         // Arrange & Act
-        let enhancer = RuleEnhancer::new_default();
+        let _enhancer = RuleEnhancer::new_default();
 
         // Assert - 默认应有 10 条规则（通过触发不同关键词验证）
         // 验证规则数量通过覆盖所有规则类型

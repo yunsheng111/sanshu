@@ -200,15 +200,26 @@ function getCategoryIcon(category: string): string {
   return icons[category] || 'i-carbon-document'
 }
 
-// 获取分类颜色
-function getCategoryColor(category: string): string {
+// 获取分类颜色（左侧色条渐变）
+function getCategoryAccentColor(category: string): string {
   const colors: Record<string, string> = {
-    '规范': 'text-blue-500',
-    '偏好': 'text-purple-500',
-    '模式': 'text-green-500',
-    '背景': 'text-orange-500',
+    '规范': 'linear-gradient(180deg, #3b82f6, #60a5fa)',
+    '偏好': 'linear-gradient(180deg, #a855f7, #c084fc)',
+    '模式': 'linear-gradient(180deg, #22c55e, #4ade80)',
+    '背景': 'linear-gradient(180deg, #f97316, #fb923c)',
   }
-  return colors[category] || 'text-gray-500'
+  return colors[category] || 'linear-gradient(180deg, #9ca3af, #d1d5db)'
+}
+
+// 获取分类标签背景色
+function getCategoryBgClass(category: string): string {
+  const classes: Record<string, string> = {
+    '规范': 'category-badge--rule',
+    '偏好': 'category-badge--preference',
+    '模式': 'category-badge--pattern',
+    '背景': 'category-badge--context',
+  }
+  return classes[category] || ''
 }
 
 // 监听分类变化，重置分页
@@ -240,15 +251,20 @@ defineExpose({
   <div class="memory-list" role="region" aria-label="记忆列表">
     <!-- 工具栏 -->
     <div class="toolbar">
-      <n-select
-        v-model:value="selectedCategory"
-        :options="categoryOptions"
-        placeholder="筛选分类"
-        class="category-filter"
-        aria-label="分类筛选"
-      />
+      <div class="toolbar-left">
+        <n-select
+          v-model:value="selectedCategory"
+          :options="categoryOptions"
+          placeholder="筛选分类"
+          class="category-filter"
+          aria-label="分类筛选"
+        />
+        <span v-if="filteredMemories.length > 0" class="toolbar-count">
+          {{ filteredMemories.length }} 条
+        </span>
+      </div>
 
-      <n-button text type="primary" :loading="loading" aria-label="刷新列表" @click="loadData">
+      <n-button text type="primary" :loading="loading" aria-label="刷新列表" class="refresh-btn" @click="loadData">
         <template #icon>
           <div class="i-carbon-renew" aria-hidden="true" />
         </template>
@@ -258,94 +274,119 @@ defineExpose({
 
     <!-- 加载状态 -->
     <div v-if="loading && memories.length === 0" class="loading-state" aria-busy="true">
-      <n-skeleton v-for="i in 3" :key="i" text :repeat="2" class="mb-4" />
+      <div v-for="i in 3" :key="i" class="skeleton-card">
+        <div class="skeleton-card-accent" />
+        <div class="skeleton-card-body">
+          <n-skeleton text style="width: 30%" />
+          <n-skeleton text style="width: 90%; margin-top: 8px;" />
+          <n-skeleton text style="width: 60%; margin-top: 4px;" />
+        </div>
+      </div>
     </div>
 
     <!-- 空状态 -->
     <div v-else-if="isEmpty" class="empty-state" role="status">
-      <div class="i-carbon-document text-4xl mb-2 opacity-20" aria-hidden="true" />
-      <div class="text-sm opacity-60">
-        暂无记忆条目
+      <div class="empty-icon-container">
+        <div class="i-carbon-document" aria-hidden="true" />
       </div>
+      <div class="empty-text">暂无记忆条目</div>
+      <div class="empty-hint">通过 MCP 工具添加记忆后将在此显示</div>
     </div>
 
     <!-- 过滤后为空 -->
     <div v-else-if="isFilteredEmpty" class="empty-state" role="status">
-      <div class="i-carbon-filter text-4xl mb-2 opacity-20" aria-hidden="true" />
-      <div class="text-sm opacity-60">
-        当前分类下暂无记忆
+      <div class="empty-icon-container">
+        <div class="i-carbon-filter" aria-hidden="true" />
       </div>
+      <div class="empty-text">当前分类下暂无记忆</div>
+      <div class="empty-hint">尝试切换其他分类查看</div>
     </div>
 
     <!-- 列表 -->
     <template v-else>
       <div class="list-container" role="list" aria-label="记忆条目列表">
-        <div v-for="memory in paginatedMemories" :key="memory.id" class="memory-item" role="listitem">
-          <!-- 编辑模式 -->
-          <template v-if="editingId === memory.id">
-            <n-input
-              v-model:value="editContent"
-              type="textarea"
-              :rows="3"
-              placeholder="输入新内容..."
-              aria-label="编辑记忆内容"
-            />
-            <div class="edit-actions">
-              <n-button size="small" aria-label="取消编辑" @click="cancelEdit">
-                取消
-              </n-button>
-              <n-button type="primary" size="small" :loading="editLoading" aria-label="保存修改" @click="saveEdit">
-                保存
-              </n-button>
-            </div>
-          </template>
+        <div
+          v-for="memory in paginatedMemories"
+          :key="memory.id"
+          class="memory-item"
+          role="listitem"
+        >
+          <!-- 左侧分类色条 -->
+          <div
+            class="memory-accent"
+            :style="{ background: getCategoryAccentColor(memory.category) }"
+          />
 
-          <!-- 显示模式 -->
-          <template v-else>
-            <div class="memory-header">
-              <div class="memory-category">
-                <div :class="[getCategoryIcon(memory.category), getCategoryColor(memory.category)]" aria-hidden="true" />
-                <span>{{ memory.category }}</span>
+          <div class="memory-body">
+            <!-- 编辑模式 -->
+            <template v-if="editingId === memory.id">
+              <n-input
+                v-model:value="editContent"
+                type="textarea"
+                :rows="3"
+                placeholder="输入新内容..."
+                aria-label="编辑记忆内容"
+                class="edit-textarea"
+              />
+              <div class="edit-actions">
+                <n-button size="small" aria-label="取消编辑" @click="cancelEdit">
+                  取消
+                </n-button>
+                <n-button type="primary" size="small" :loading="editLoading" aria-label="保存修改" @click="saveEdit">
+                  保存
+                </n-button>
               </div>
-              <span class="memory-time">{{ formatDate(memory.created_at) }}</span>
-            </div>
+            </template>
 
-            <div class="memory-content">
-              {{ memory.content }}
-            </div>
+            <!-- 显示模式 -->
+            <template v-else>
+              <div class="memory-header">
+                <div class="memory-category">
+                  <span :class="['category-badge', getCategoryBgClass(memory.category)]">
+                    <div :class="getCategoryIcon(memory.category)" aria-hidden="true" />
+                    {{ memory.category }}
+                  </span>
+                </div>
+                <span class="memory-time">{{ formatDate(memory.created_at) }}</span>
+              </div>
 
-            <div class="memory-actions">
-              <n-button text type="primary" size="tiny" aria-label="编辑此记忆" @click="startEdit(memory)">
-                <template #icon>
-                  <div class="i-carbon-edit" aria-hidden="true" />
-                </template>
-                编辑
-              </n-button>
+              <div class="memory-content">
+                {{ memory.content }}
+              </div>
 
-              <n-popconfirm
-                :show="deleteConfirmId === memory.id"
-                @positive-click="deleteMemory(memory.id)"
-                @negative-click="deleteConfirmId = null"
-              >
-                <template #trigger>
-                  <n-button
-                    text
-                    type="error"
-                    size="tiny"
-                    :loading="deleteLoading && deleteConfirmId === memory.id"
-                    aria-label="删除此记忆"
-                    @click="deleteConfirmId = memory.id"
-                  >
-                    <template #icon>
-                      <div class="i-carbon-trash-can" aria-hidden="true" />
-                    </template>
-                    删除
-                  </n-button>
-                </template>
-                确定要删除这条记忆吗?
-              </n-popconfirm>
-            </div>
-          </template>
+              <div class="memory-actions">
+                <n-button text type="primary" size="tiny" aria-label="编辑此记忆" @click="startEdit(memory)">
+                  <template #icon>
+                    <div class="i-carbon-edit" aria-hidden="true" />
+                  </template>
+                  编辑
+                </n-button>
+
+                <n-popconfirm
+                  :show="deleteConfirmId === memory.id"
+                  @positive-click="deleteMemory(memory.id)"
+                  @negative-click="deleteConfirmId = null"
+                >
+                  <template #trigger>
+                    <n-button
+                      text
+                      type="error"
+                      size="tiny"
+                      :loading="deleteLoading && deleteConfirmId === memory.id"
+                      aria-label="删除此记忆"
+                      @click="deleteConfirmId = memory.id"
+                    >
+                      <template #icon>
+                        <div class="i-carbon-trash-can" aria-hidden="true" />
+                      </template>
+                      删除
+                    </n-button>
+                  </template>
+                  确定要删除这条记忆吗?
+                </n-popconfirm>
+              </div>
+            </template>
+          </div>
         </div>
       </div>
 
@@ -379,64 +420,218 @@ defineExpose({
   gap: 12px;
 }
 
+.toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .category-filter {
   width: 140px;
 }
 
-/* 状态 */
-.loading-state,
+.toolbar-count {
+  font-size: 12px;
+  color: var(--color-on-surface-secondary, #9ca3af);
+  font-variant-numeric: tabular-nums;
+}
+
+.refresh-btn {
+  opacity: 0.6;
+  transition: opacity 0.2s;
+}
+
+.refresh-btn:hover {
+  opacity: 1;
+}
+
+/* 加载骨架 */
+.loading-state {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.skeleton-card {
+  display: flex;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid var(--color-border, rgba(128, 128, 128, 0.08));
+}
+
+.skeleton-card-accent {
+  width: 3px;
+  flex-shrink: 0;
+  background: var(--color-border, rgba(128, 128, 128, 0.15));
+}
+
+.skeleton-card-body {
+  flex: 1;
+  padding: 16px 18px;
+}
+
+/* 空状态 - 重设计 */
 .empty-state {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   min-height: 200px;
-  color: var(--color-on-surface-muted, #9ca3af);
+  gap: 6px;
+}
+
+.empty-icon-container {
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, rgba(20, 184, 166, 0.06), rgba(59, 130, 246, 0.04));
+  border: 1px dashed rgba(20, 184, 166, 0.2);
+  margin-bottom: 4px;
+}
+
+:root.dark .empty-icon-container {
+  background: linear-gradient(135deg, rgba(20, 184, 166, 0.1), rgba(59, 130, 246, 0.08));
+  border-color: rgba(20, 184, 166, 0.25);
+}
+
+.empty-icon-container [class^="i-carbon-"] {
+  font-size: 22px;
+  color: rgba(20, 184, 166, 0.4);
+}
+
+.empty-text {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-on-surface-secondary, #6b7280);
+  opacity: 0.7;
+}
+
+:root.dark .empty-text {
+  color: #9ca3af;
+}
+
+.empty-hint {
+  font-size: 11px;
+  color: var(--color-on-surface-secondary, #9ca3af);
+  opacity: 0.5;
 }
 
 /* 列表容器 */
 .list-container {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
 }
 
-/* 记忆条目 */
+/* 记忆条目 - 带左侧色条 */
 .memory-item {
-  padding: 14px 16px;
-  border-radius: 8px;
-  background: var(--color-container, rgba(255, 255, 255, 0.5));
-  border: 1px solid var(--color-border, rgba(128, 128, 128, 0.15));
+  display: flex;
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--color-container, rgba(255, 255, 255, 0.6));
+  border: 1px solid var(--color-border, rgba(128, 128, 128, 0.1));
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.memory-item:hover {
+  border-color: rgba(20, 184, 166, 0.2);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.04);
+  transform: translateY(-1px);
 }
 
 :root.dark .memory-item {
-  background: rgba(24, 24, 28, 0.5);
-  border-color: rgba(255, 255, 255, 0.08);
+  background: rgba(28, 28, 34, 0.5);
+  border-color: rgba(255, 255, 255, 0.05);
+}
+
+:root.dark .memory-item:hover {
+  border-color: rgba(20, 184, 166, 0.25);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.15);
+}
+
+/* 左侧色条 */
+.memory-accent {
+  width: 3px;
+  flex-shrink: 0;
+  border-radius: 3px 0 0 3px;
+}
+
+.memory-body {
+  flex: 1;
+  padding: 14px 18px;
+  min-width: 0;
 }
 
 .memory-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 8px;
+  margin-bottom: 10px;
 }
 
-.memory-category {
-  display: flex;
+/* 分类标签（pill 样式） */
+.category-badge {
+  display: inline-flex;
   align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  font-weight: 500;
+  gap: 4px;
+  padding: 2px 10px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.category-badge--rule {
+  background: rgba(59, 130, 246, 0.08);
+  color: #3b82f6;
+}
+
+.category-badge--preference {
+  background: rgba(168, 85, 247, 0.08);
+  color: #a855f7;
+}
+
+.category-badge--pattern {
+  background: rgba(34, 197, 94, 0.08);
+  color: #22c55e;
+}
+
+.category-badge--context {
+  background: rgba(249, 115, 22, 0.08);
+  color: #f97316;
+}
+
+:root.dark .category-badge--rule {
+  background: rgba(59, 130, 246, 0.15);
+  color: #60a5fa;
+}
+
+:root.dark .category-badge--preference {
+  background: rgba(168, 85, 247, 0.15);
+  color: #c084fc;
+}
+
+:root.dark .category-badge--pattern {
+  background: rgba(34, 197, 94, 0.15);
+  color: #4ade80;
+}
+
+:root.dark .category-badge--context {
+  background: rgba(249, 115, 22, 0.15);
+  color: #fb923c;
 }
 
 .memory-time {
   font-size: 11px;
   color: var(--color-on-surface-secondary, #9ca3af);
+  font-variant-numeric: tabular-nums;
 }
 
 .memory-content {
   font-size: 13px;
-  line-height: 1.6;
+  line-height: 1.7;
   color: var(--color-on-surface, #111827);
   word-break: break-word;
 }
@@ -447,24 +642,35 @@ defineExpose({
 
 .memory-actions {
   display: flex;
-  gap: 12px;
-  margin-top: 10px;
+  gap: 14px;
+  margin-top: 12px;
   padding-top: 10px;
-  border-top: 1px solid var(--color-border, rgba(128, 128, 128, 0.1));
+  border-top: 1px solid var(--color-border, rgba(128, 128, 128, 0.06));
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.memory-item:hover .memory-actions {
+  opacity: 1;
 }
 
 /* 编辑状态 */
+.edit-textarea {
+  margin-bottom: 8px;
+}
+
 .edit-actions {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-  margin-top: 10px;
 }
 
 /* 分页 */
 .pagination {
   display: flex;
   justify-content: center;
-  margin-top: 8px;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--color-border, rgba(128, 128, 128, 0.06));
 }
 </style>

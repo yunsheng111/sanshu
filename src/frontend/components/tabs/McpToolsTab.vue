@@ -8,7 +8,7 @@ const SouConfig = defineAsyncComponent(() => import('../tools/SouConfig.vue'))
 const Context7Config = defineAsyncComponent(() => import('../tools/Context7Config.vue'))
 const IconWorkshop = defineAsyncComponent(() => import('../tools/IconWorkshop/IconWorkshop.vue'))
 const EnhanceConfig = defineAsyncComponent(() => import('../tools/EnhanceConfig.vue'))
-const MemoryConfig = defineAsyncComponent(() => import('../tools/MemoryConfig.vue'))
+const MemoryManager = defineAsyncComponent(() => import('../tools/MemoryManager.vue'))
 
 const props = defineProps<{
   projectRootPath?: string | null
@@ -213,9 +213,10 @@ onMounted(async () => {
       :bordered="false"
       size="huge"
       class="config-modal"
+      :content-style="{ maxHeight: 'calc(90vh - 120px)', overflow: 'hidden', display: 'flex', flexDirection: 'column' }"
       transform-origin="center"
     >
-      <div class="min-h-[400px]">
+      <div class="modal-inner-container">
         <SouConfig v-if="currentToolId === 'sou'" :active="showToolConfigModal" />
         <Context7Config v-else-if="currentToolId === 'context7'" :active="showToolConfigModal" />
         <EnhanceConfig
@@ -224,7 +225,7 @@ onMounted(async () => {
           :project-root-path="props.projectRootPath"
         />
         <IconWorkshop v-else-if="currentToolId === 'icon'" :active="showToolConfigModal" />
-        <MemoryConfig
+        <MemoryManager
           v-else-if="currentToolId === 'ji'"
           :active="showToolConfigModal"
           :project-root-path="props.projectRootPath"
@@ -244,38 +245,46 @@ onMounted(async () => {
 /* ========== 工具卡片样式 ========== */
 .tool-card {
   position: relative;
-  border-radius: 12px;
+  border-radius: 14px;
   overflow: hidden;
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  border: 1px solid var(--color-border, rgba(128, 128, 128, 0.2));
-  background: var(--color-container, rgba(255, 255, 255, 0.8));
-  backdrop-filter: blur(8px);
+  border: 1px solid var(--color-border, rgba(128, 128, 128, 0.15));
+  background: var(--color-container, rgba(255, 255, 255, 0.85));
+  backdrop-filter: blur(12px);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(0, 0, 0, 0.02);
 }
 
 /* 深色模式背景 */
 :root.dark .tool-card {
-  background: rgba(24, 24, 28, 0.9);
-  border-color: rgba(255, 255, 255, 0.08);
+  background: rgba(28, 28, 34, 0.9);
+  border-color: rgba(255, 255, 255, 0.06);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2), 0 1px 2px rgba(0, 0, 0, 0.1);
 }
 
 /* 禁用状态 */
 .tool-card--disabled {
-  opacity: 0.6;
-  filter: grayscale(0.3);
+  opacity: 0.55;
+  filter: grayscale(0.4);
+}
+
+.tool-card--disabled:hover {
+  opacity: 0.7;
 }
 
 /* 悬停效果 */
 .tool-card:hover {
-  transform: translateY(-2px);
+  transform: translateY(-3px);
+  border-color: rgba(20, 184, 166, 0.25);
   box-shadow:
-    0 8px 25px -5px rgba(20, 184, 166, 0.15),
-    0 0 20px -5px rgba(20, 184, 166, 0.1);
+    0 12px 28px -5px rgba(20, 184, 166, 0.12),
+    0 4px 12px -4px rgba(0, 0, 0, 0.06);
 }
 
 :root.dark .tool-card:hover {
+  border-color: rgba(20, 184, 166, 0.3);
   box-shadow:
-    0 8px 25px -5px rgba(20, 184, 166, 0.25),
-    0 0 20px -5px rgba(20, 184, 166, 0.15);
+    0 12px 28px -5px rgba(20, 184, 166, 0.2),
+    0 4px 12px -4px rgba(0, 0, 0, 0.15);
 }
 
 /* 顶部装饰线 */
@@ -284,15 +293,15 @@ onMounted(async () => {
   top: 0;
   left: 0;
   right: 0;
-  height: 2px;
+  height: 3px;
   background: linear-gradient(
     90deg,
-    transparent,
-    rgba(20, 184, 166, 0.5),
-    transparent
+    transparent 5%,
+    rgba(20, 184, 166, 0.6),
+    transparent 95%
   );
   opacity: 0;
-  transition: opacity 0.3s ease;
+  transition: opacity 0.35s ease;
 }
 
 .tool-card:hover .card-top-border {
@@ -303,7 +312,7 @@ onMounted(async () => {
 .card-content {
   display: flex;
   gap: 16px;
-  padding: 16px;
+  padding: 18px;
 }
 
 /* 图标容器 */
@@ -315,12 +324,13 @@ onMounted(async () => {
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  transition: transform 0.3s ease;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
 }
 
 .tool-card:hover .tool-icon-wrapper {
-  transform: scale(1.05);
+  transform: scale(1.08) rotate(-2deg);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
 }
 
 /* 工具信息区域 */
@@ -345,10 +355,11 @@ onMounted(async () => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  letter-spacing: -0.01em;
 }
 
 :root.dark .tool-name {
-  color: #e5e7eb;
+  color: #f3f4f6;
 }
 
 .tool-description {
@@ -360,6 +371,7 @@ onMounted(async () => {
   -webkit-box-orient: vertical;
   overflow: hidden;
   min-height: 36px;
+  opacity: 0.85;
 }
 
 :root.dark .tool-description {
@@ -371,25 +383,25 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding-top: 8px;
-  border-top: 1px solid var(--color-border, rgba(128, 128, 128, 0.15));
+  padding-top: 10px;
+  border-top: 1px solid var(--color-border, rgba(128, 128, 128, 0.1));
 }
 
 :root.dark .tool-actions {
-  border-color: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.06);
 }
 
 /* ========== 骨架屏样式 ========== */
 .tool-card-skeleton {
-  border-radius: 12px;
-  padding: 16px;
-  background: var(--color-container, rgba(255, 255, 255, 0.8));
-  border: 1px solid var(--color-border, rgba(128, 128, 128, 0.2));
+  border-radius: 14px;
+  padding: 18px;
+  background: var(--color-container, rgba(255, 255, 255, 0.85));
+  border: 1px solid var(--color-border, rgba(128, 128, 128, 0.15));
 }
 
 :root.dark .tool-card-skeleton {
-  background: rgba(24, 24, 28, 0.9);
-  border-color: rgba(255, 255, 255, 0.08);
+  background: rgba(28, 28, 34, 0.9);
+  border-color: rgba(255, 255, 255, 0.06);
 }
 
 .skeleton-header {
@@ -448,26 +460,34 @@ onMounted(async () => {
 .stats-footer {
   display: flex;
   justify-content: center;
-  padding-top: 8px;
+  padding-top: 12px;
 }
 
 .stats-badge {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 16px;
-  border-radius: 20px;
+  padding: 8px 20px;
+  border-radius: 24px;
   font-size: 12px;
   font-weight: 500;
-  background: var(--color-container, rgba(255, 255, 255, 0.8));
-  border: 1px solid var(--color-border, rgba(128, 128, 128, 0.2));
+  background: var(--color-container, rgba(255, 255, 255, 0.85));
+  border: 1px solid var(--color-border, rgba(128, 128, 128, 0.15));
   color: var(--color-on-surface-secondary, #6b7280);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  transition: all 0.2s ease;
+}
+
+.stats-badge:hover {
+  border-color: rgba(20, 184, 166, 0.25);
+  box-shadow: 0 2px 8px rgba(20, 184, 166, 0.06);
 }
 
 :root.dark .stats-badge {
-  background: rgba(24, 24, 28, 0.9);
-  border-color: rgba(255, 255, 255, 0.08);
+  background: rgba(28, 28, 34, 0.9);
+  border-color: rgba(255, 255, 255, 0.06);
   color: #9ca3af;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
 }
 
 /* ========== 重连提示 ========== */
@@ -483,6 +503,16 @@ onMounted(async () => {
   align-items: center;
   justify-content: center;
   color: var(--color-on-surface-muted, #9ca3af);
+}
+
+/* ========== 弹窗内容容器 ========== */
+.modal-inner-container {
+  height: calc(90vh - 120px);
+  min-height: 400px;
+  max-height: calc(90vh - 120px);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 /* ========== 过渡动画 ========== */

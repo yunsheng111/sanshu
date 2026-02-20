@@ -1,19 +1,26 @@
 {
   "project_name": "sanshu",
   "version": "0.5.0",
-  "scanned_at": "2026-02-18T14:23:45Z",
+  "scanned_at": "2026-02-19T10:00:00Z",
+  "updated_at": "2026-02-19T10:00:00Z",
+  "update_reason": "P0-P3 上下文检索优化实施后全量文档更新",
   "modules": [
     {
       "name": "frontend",
       "path": "src/frontend",
       "language": "Vue 3 + TypeScript",
       "entry": "main.ts",
-      "description": "前端 UI 界面",
+      "description": "前端 UI 界面（组件、composables、i18n、Pinia、vitest 测试）",
       "key_files": [
         "App.vue",
         "main.ts",
         "vite.config.js",
-        "uno.config.ts"
+        "uno.config.ts",
+        "vitest.config.ts",
+        "stores/searchStore.ts",
+        "i18n/index.ts",
+        "composables/useSafeInvoke.ts",
+        "composables/useSearchFeedback.ts"
       ],
       "subdirectories": [
         "components",
@@ -21,10 +28,28 @@
         "theme",
         "types",
         "constants",
-        "utils"
+        "utils",
+        "stores",
+        "i18n",
+        "test"
       ],
-      "has_tests": false,
-      "documentation": "src/frontend/CLAUDE.md"
+      "file_count": 102,
+      "has_tests": true,
+      "test_files": [
+        "components/tools/__tests__/EnhanceConfig.spec.ts",
+        "components/tools/__tests__/SouConfig.spec.ts",
+        "components/tools/MemoryList.spec.ts",
+        "composables/useSafeInvoke.spec.ts"
+      ],
+      "documentation": "src/frontend/CLAUDE.md",
+      "p0_p3_changes": [
+        "P3: 新增 i18n 国际化（zh/en）",
+        "P3: 新增 Pinia 状态管理（searchStore）",
+        "P3: 新增 vitest + happy-dom 测试框架",
+        "P3: 新增 useSafeInvoke（IPC 弹性调用）",
+        "P3: 新增 useSearchFeedback（搜索实时反馈）",
+        "P3: 新增 MemorySearch / SearchPreview / MemoryList 组件"
+      ]
     },
     {
       "name": "app",
@@ -39,20 +64,24 @@
         "setup.rs",
         "commands.rs"
       ],
+      "file_count": 5,
       "has_tests": false,
-      "documentation": null
+      "documentation": "src/rust/app/CLAUDE.md"
     },
     {
       "name": "mcp",
       "path": "src/rust/mcp",
       "language": "Rust",
       "entry": "bin/mcp_server.rs",
-      "description": "MCP 服务器与工具集",
+      "description": "MCP 服务器核心（ZhiServer + 路由 + 热更新 + 指标收集 + 统一错误）",
       "key_files": [
         "bin/mcp_server.rs",
         "server.rs",
         "types.rs",
-        "commands.rs"
+        "commands.rs",
+        "hot_reload.rs",
+        "metrics.rs",
+        "utils/errors.rs"
       ],
       "subdirectories": [
         "tools/interaction",
@@ -62,10 +91,18 @@
         "tools/context7",
         "tools/icon",
         "tools/uiux",
-        "tools/skills"
+        "tools/skills",
+        "handlers",
+        "utils"
       ],
+      "file_count": 12,
       "has_tests": true,
-      "documentation": "src/rust/mcp/CLAUDE.md"
+      "documentation": "src/rust/mcp/CLAUDE.md",
+      "p0_p3_changes": [
+        "P2: 新增 hot_reload.rs（SC-13 配置热更新，5s 缓存刷新）",
+        "P2: 新增 metrics.rs（SC-14 可观测性指标，P50/P95/P99 延迟）",
+        "P2: 新增 utils/errors.rs（HC-6 统一错误分类，12 种错误变体）"
+      ]
     },
     {
       "name": "mcp/tools/interaction",
@@ -78,59 +115,92 @@
         "zhi_history.rs",
         "commands.rs"
       ],
+      "file_count": 4,
       "has_tests": false,
-      "documentation": null
+      "documentation": "src/rust/mcp/tools/interaction/CLAUDE.md"
     },
     {
       "name": "mcp/tools/memory",
       "path": "src/rust/mcp/tools/memory",
       "language": "Rust",
       "entry": "mod.rs",
-      "description": "全局记忆管理 (ji)",
+      "description": "全局记忆管理 (ji)（并发安全 SharedMemoryManager + 版本控制 + 原子写入）",
       "key_files": [
         "manager.rs",
         "similarity.rs",
         "dedup.rs",
         "migration.rs",
-        "mcp.rs"
+        "mcp.rs",
+        "types.rs"
       ],
+      "file_count": 7,
       "has_tests": true,
       "test_files": [
         "similarity.rs",
         "dedup.rs",
         "migration.rs"
       ],
-      "documentation": null
+      "documentation": "src/rust/mcp/tools/memory/CLAUDE.md",
+      "p0_p3_changes": [
+        "P0: SharedMemoryManager（Arc<RwLock> 并发安全包装）",
+        "P0: 版本控制（MemoryEntry v2.1 + snapshots 最多 5 个）",
+        "P0: 原子写入（.tmp + rename）",
+        "P0: 新增 '更新' action（自动创建快照）"
+      ]
     },
     {
       "name": "mcp/tools/acemcp",
       "path": "src/rust/mcp/tools/acemcp",
       "language": "Rust",
       "entry": "mod.rs",
-      "description": "代码库索引与搜索 (sou)",
+      "description": "代码库混合检索 (sou)（BM25 + 向量语义 + RRF 融合 + 三层缓存 + 多提供者嵌入）",
       "key_files": [
         "mcp.rs",
         "watcher.rs",
         "commands.rs",
-        "types.rs"
+        "types.rs",
+        "hybrid_search.rs",
+        "local_index.rs",
+        "embedding_client.rs",
+        "cache.rs"
       ],
+      "file_count": 9,
       "has_tests": false,
-      "documentation": null
+      "documentation": "src/rust/mcp/tools/acemcp/CLAUDE.md",
+      "p0_p3_changes": [
+        "P1: 混合检索引擎（BM25 + 向量 + RRF 融合排序）",
+        "P1: 本地向量索引（增量更新，500MB 限制）",
+        "P1: 多提供者嵌入客户端（Jina/SiliconFlow/Cloudflare/Nomic/Cohere/Ollama）",
+        "P1: 三层缓存（内存 LRU 100 条 5min + 磁盘 SHA256 24h + API）"
+      ]
     },
     {
       "name": "mcp/tools/enhance",
       "path": "src/rust/mcp/tools/enhance",
       "language": "Rust",
       "entry": "mod.rs",
-      "description": "提示词增强 (enhance)",
+      "description": "提示词增强 (enhance)（统一 Chat 客户端 + 三级降级链 + 规则引擎 + 结果缓存）",
       "key_files": [
         "core.rs",
         "history.rs",
         "mcp.rs",
-        "types.rs"
+        "types.rs",
+        "chat_client.rs",
+        "provider_factory.rs",
+        "rule_engine.rs",
+        "cache.rs",
+        "utils.rs",
+        "commands.rs"
       ],
+      "file_count": 11,
       "has_tests": false,
-      "documentation": null
+      "documentation": "src/rust/mcp/tools/enhance/CLAUDE.md",
+      "p0_p3_changes": [
+        "P1: 统一 Chat 客户端（Ollama/OpenAI/Gemini/Anthropic/规则引擎）",
+        "P1: 三级降级链（L1 Ollama 本地 -> L2 云端 API -> L3 规则引擎）",
+        "P1: 规则引擎（10 条内置规则，正则触发 + 模板增强）",
+        "P1: 结果缓存（LRU 50 条，10min TTL）"
+      ]
     },
     {
       "name": "mcp/tools/context7",
@@ -143,8 +213,9 @@
         "commands.rs",
         "types.rs"
       ],
+      "file_count": 4,
       "has_tests": false,
-      "documentation": null
+      "documentation": "src/rust/mcp/tools/context7/CLAUDE.md"
     },
     {
       "name": "mcp/tools/icon",
@@ -158,8 +229,9 @@
         "commands.rs",
         "types.rs"
       ],
+      "file_count": 5,
       "has_tests": false,
-      "documentation": null
+      "documentation": "src/rust/mcp/tools/icon/CLAUDE.md"
     },
     {
       "name": "mcp/tools/uiux",
@@ -174,11 +246,12 @@
         "response.rs",
         "sanitize.rs"
       ],
+      "file_count": 8,
       "has_tests": true,
       "test_files": [
         "engine.rs"
       ],
-      "documentation": null
+      "documentation": "src/rust/mcp/tools/uiux/CLAUDE.md"
     },
     {
       "name": "mcp/tools/skills",
@@ -189,8 +262,9 @@
       "key_files": [
         "mod.rs"
       ],
+      "file_count": 1,
       "has_tests": false,
-      "documentation": null
+      "documentation": "src/rust/mcp/tools/skills/CLAUDE.md"
     },
     {
       "name": "telegram",
@@ -205,11 +279,12 @@
         "mcp_handler.rs",
         "commands.rs"
       ],
+      "file_count": 6,
       "has_tests": true,
       "test_files": [
         "markdown.rs"
       ],
-      "documentation": null
+      "documentation": "src/rust/telegram/CLAUDE.md"
     },
     {
       "name": "network",
@@ -223,13 +298,14 @@
         "client.rs",
         "commands.rs"
       ],
+      "file_count": 5,
       "has_tests": true,
       "test_files": [
         "proxy.rs",
         "geo.rs",
         "client.rs"
       ],
-      "documentation": null
+      "documentation": "src/rust/network/CLAUDE.md"
     },
     {
       "name": "ui",
@@ -248,65 +324,108 @@
         "font_commands.rs",
         "commands.rs"
       ],
+      "file_count": 10,
       "has_tests": false,
-      "documentation": null
+      "documentation": "src/rust/ui/CLAUDE.md"
     },
     {
       "name": "config",
       "path": "src/rust/config",
       "language": "Rust",
       "entry": "mod.rs",
-      "description": "配置管理",
+      "description": "配置管理（settings + storage + 密钥安全存储）",
       "key_files": [
         "settings.rs",
-        "storage.rs"
+        "storage.rs",
+        "keyring.rs"
       ],
+      "file_count": 4,
       "has_tests": false,
-      "documentation": null
+      "documentation": "src/rust/config/CLAUDE.md",
+      "p0_p3_changes": [
+        "P2: 新增 keyring.rs（HC-9 密钥安全存储，系统凭据管理器）",
+        "P2: storage.rs 改进（sync_all 强制刷新，防损坏）"
+      ]
     }
   ],
   "coverage": {
     "total_modules": 15,
-    "documented_modules": 2,
-    "tested_modules": 4,
-    "estimated_file_count": 250,
-    "scanned_file_count": 165,
-    "coverage_percentage": 66
+    "documented_modules": 15,
+    "tested_modules": 6,
+    "estimated_file_count": 209,
+    "scanned_file_count": 204,
+    "coverage_percentage": 97,
+    "file_breakdown": {
+      "rust_rs": 107,
+      "typescript_ts": 44,
+      "vue": 58
+    }
   },
   "gaps": {
-    "missing_documentation": [
+    "missing_documentation": [],
+    "missing_tests": [
       "src/rust/app",
       "src/rust/mcp/tools/interaction",
-      "src/rust/mcp/tools/memory",
       "src/rust/mcp/tools/acemcp",
       "src/rust/mcp/tools/enhance",
       "src/rust/mcp/tools/context7",
       "src/rust/mcp/tools/icon",
-      "src/rust/mcp/tools/uiux",
       "src/rust/mcp/tools/skills",
-      "src/rust/telegram",
-      "src/rust/network",
       "src/rust/ui",
       "src/rust/config"
     ],
-    "missing_tests": [
-      "src/frontend",
-      "src/rust/app",
-      "src/rust/mcp/tools/interaction",
-      "src/rust/mcp/tools/acemcp",
-      "src/rust/mcp/tools/enhance",
-      "src/rust/mcp/tools/context7",
-      "src/rust/mcp/tools/icon",
-      "src/rust/mcp/tools/skills",
-      "src/rust/ui",
-      "src/rust/config"
+    "missing_info": {
+      "acemcp": "缺集成测试（混合检索端到端验证）",
+      "enhance": "缺集成测试（三级降级链端到端验证）",
+      "config": "缺 keyring 集成测试（跨平台凭据管理器）"
+    }
+  },
+  "p0_p3_summary": {
+    "completed_at": "2026-02-19",
+    "priorities": {
+      "P0": "记忆并发安全与版本控制（SharedMemoryManager + 快照/回滚）",
+      "P1": "混合检索引擎 + 统一 Chat 客户端 + 三级降级链 + 三层缓存",
+      "P2": "配置热更新 + 可观测性指标 + 统一错误分类 + 密钥安全存储",
+      "P3": "前端 i18n + Pinia + vitest + IPC 弹性调用 + 搜索反馈 UI"
+    },
+    "new_files": [
+      "src/rust/mcp/hot_reload.rs",
+      "src/rust/mcp/metrics.rs",
+      "src/rust/mcp/utils/errors.rs",
+      "src/rust/config/keyring.rs",
+      "src/rust/mcp/tools/acemcp/hybrid_search.rs",
+      "src/rust/mcp/tools/acemcp/local_index.rs",
+      "src/rust/mcp/tools/acemcp/embedding_client.rs",
+      "src/rust/mcp/tools/acemcp/cache.rs",
+      "src/rust/mcp/tools/enhance/chat_client.rs",
+      "src/rust/mcp/tools/enhance/provider_factory.rs",
+      "src/rust/mcp/tools/enhance/rule_engine.rs",
+      "src/rust/mcp/tools/enhance/cache.rs",
+      "src/frontend/stores/searchStore.ts",
+      "src/frontend/stores/index.ts",
+      "src/frontend/i18n/index.ts",
+      "src/frontend/i18n/zh.ts",
+      "src/frontend/i18n/en.ts",
+      "src/frontend/composables/useSafeInvoke.ts",
+      "src/frontend/composables/useSearchFeedback.ts",
+      "src/frontend/components/tools/MemorySearch.vue",
+      "src/frontend/components/tools/SearchPreview.vue",
+      "src/frontend/components/tools/MemoryList.vue"
+    ],
+    "major_modifications": [
+      "src/rust/mcp/tools/memory/manager.rs (SharedMemoryManager + 原子写入)",
+      "src/rust/mcp/tools/memory/types.rs (v2.1: version + snapshots)",
+      "src/rust/mcp/tools/memory/mcp.rs (新增 '更新' action)",
+      "src/rust/config/storage.rs (sync_all 强制刷新)",
+      "src/rust/mcp/server.rs (热更新 + 指标集成)"
     ]
   },
   "next_steps": [
-    "为缺失文档的模块生成 CLAUDE.md",
-    "补充前端单元测试",
-    "补充 MCP 工具集成测试",
-    "完善 API 文档和使用示例"
+    "为 acemcp 模块补充混合检索集成测试",
+    "为 enhance 模块补充三级降级链集成测试",
+    "为 config/keyring 补充跨平台凭据管理器测试",
+    "补充 MCP 基础设施模块（hot_reload/metrics）单元测试",
+    "前端 vitest 覆盖率提升（当前仅 4 个测试文件）"
   ],
   "ignored_patterns": [
     "node_modules/**",

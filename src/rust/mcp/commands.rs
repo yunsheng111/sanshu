@@ -302,6 +302,15 @@ pub async fn save_memory_config(project_path: String, config: MemoryConfigDto) -
         enable_dedup: config.enable_dedup,
         max_entry_bytes: 10240, // 10KB 默认值
         max_entries: 1000,      // 1000 条默认值
+        // v2.2 新增配置使用默认值
+        write_guard_semantic_threshold: 0.80,
+        write_guard_update_threshold: 0.60,
+        vitality_decay_half_life_days: 30,
+        vitality_cleanup_threshold: 0.35,
+        vitality_cleanup_inactive_days: 14,
+        vitality_access_boost: 0.5,
+        vitality_max_score: 3.0,
+        summary_length_threshold: 500,
     };
     
     manager.update_config(new_config)
@@ -386,6 +395,8 @@ pub async fn search_memories(
     project_path: String,
     query: String,
     category: Option<String>,
+    domain: Option<String>,
+    tags: Option<Vec<String>>,
 ) -> Result<Vec<SearchMemoryResultDto>, String> {
     use crate::mcp::tools::memory::similarity::TextSimilarity;
 
@@ -408,13 +419,38 @@ pub async fn search_memories(
                 }
             }
 
-            // 计算相关度（结合包含匹配和相似度）
+            // 域过滤（SC-17）
+            if let Some(ref domain_filter) = domain {
+                if let Some(ref entry_domain) = m.domain {
+                    if !entry_domain.contains(domain_filter) {
+                        return None;
+                    }
+                } else {
+                    // 记忆没有域信息，不匹配域过滤
+                    return None;
+                }
+            }
+
+            // 标签过滤（SC-17）
+            if let Some(ref tags_filter) = tags {
+                if let Some(ref entry_tags) = m.tags {
+                    // 要求所有过滤标签都存在于记忆的标签中
+                    if !tags_filter.iter().all(|t| entry_tags.contains(t)) {
+                        return None;
+                    }
+                } else {
+                    // 记忆没有标签信息，不匹配标签过滤
+                    return None;
+                }
+            }
+
+            // 计算相关度（结合包含匹配、意图识别和相似度）
             let content_lower = m.content.to_lowercase();
             let mut relevance = 0.0;
 
             // 精确包含匹配（高权重）
             if content_lower.contains(&query_lower) {
-                relevance += 0.6;
+                relevance += 0.5;
             }
 
             // 词级匹配
@@ -423,12 +459,16 @@ pub async fn search_memories(
                 .filter(|w| content_lower.contains(*w))
                 .count();
             if !query_words.is_empty() {
-                relevance += 0.2 * (matched_words as f64 / query_words.len() as f64);
+                relevance += 0.15 * (matched_words as f64 / query_words.len() as f64);
             }
+
+            // 意图识别加权（SC-24）
+            let intent_boost = calculate_intent_boost(&query_lower, &content_lower, &m.category);
+            relevance += intent_boost;
 
             // 相似度计算
             let similarity = TextSimilarity::calculate(&query_normalized, &m.content_normalized);
-            relevance += 0.2 * similarity;
+            relevance += 0.15 * similarity;
 
             // 过滤低相关度结果
             if relevance < 0.1 {
@@ -453,6 +493,62 @@ pub async fn search_memories(
     results.sort_by(|a, b| b.relevance.partial_cmp(&a.relevance).unwrap_or(std::cmp::Ordering::Equal));
 
     Ok(results)
+}
+
+/// 意图识别加权（SC-24）
+///
+/// 根据查询关键词和记忆分类，识别用户意图并提升相关度
+fn calculate_intent_boost(query: &str, content: &str, category: &crate::mcp::tools::memory::MemoryCategory) -> f64 {
+    use crate::mcp::tools::memory::MemoryCategory;
+
+    let mut boost = 0.0;
+
+    // 规范类意图关键词
+    let rule_keywords = ["规范", "规则", "约束", "标准", "要求", "必须", "禁止", "应该"];
+    // 偏好类意图关键词
+    let preference_keywords = ["偏好", "喜欢", "习惯", "风格", "倾向", "选择"];
+    // 模式类意图关键词
+    let pattern_keywords = ["模式", "实践", "方法", "技巧", "经验", "最佳", "优化"];
+    // 背景类意图关键词
+    let context_keywords = ["背景", "上下文", "项目", "架构", "技术栈", "依赖"];
+
+    // 检查查询中是否包含分类相关关键词
+    let has_rule_intent = rule_keywords.iter().any(|k| query.contains(k));
+    let has_preference_intent = preference_keywords.iter().any(|k| query.contains(k));
+    let has_pattern_intent = pattern_keywords.iter().any(|k| query.contains(k));
+    let has_context_intent = context_keywords.iter().any(|k| query.contains(k));
+
+    // 检查内容中是否包含分类相关关键词
+    let content_has_rule = rule_keywords.iter().any(|k| content.contains(k));
+    let content_has_preference = preference_keywords.iter().any(|k| content.contains(k));
+    let content_has_pattern = pattern_keywords.iter().any(|k| content.contains(k));
+    let content_has_context = context_keywords.iter().any(|k| content.contains(k));
+
+    // 意图与分类匹配时提升权重
+    match category {
+        MemoryCategory::Rule => {
+            if has_rule_intent || content_has_rule {
+                boost += 0.2;
+            }
+        }
+        MemoryCategory::Preference => {
+            if has_preference_intent || content_has_preference {
+                boost += 0.2;
+            }
+        }
+        MemoryCategory::Pattern => {
+            if has_pattern_intent || content_has_pattern {
+                boost += 0.2;
+            }
+        }
+        MemoryCategory::Context => {
+            if has_context_intent || content_has_context {
+                boost += 0.2;
+            }
+        }
+    }
+
+    boost
 }
 
 /// 生成高亮片段
@@ -550,6 +646,39 @@ pub async fn export_memories(project_path: String) -> Result<ExportMemoriesDto, 
         total_count: entries.len(),
         entries,
     })
+}
+
+/// 域信息 DTO（供前端 DomainTree 使用）
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+pub struct DomainInfoDto {
+    /// 域路径
+    pub path: String,
+    /// 该域下的记忆数量
+    pub count: usize,
+    /// 子域列表（当前实现为扁平结构，无子域）
+    pub children: Vec<DomainInfoDto>,
+}
+
+/// 获取域列表（供前端 DomainTree 组件使用）
+#[tauri::command]
+pub async fn get_domain_list(project_path: String) -> Result<Vec<DomainInfoDto>, String> {
+    let manager = SharedMemoryManager::new(&project_path)
+        .map_err(|e| format!("创建记忆管理器失败: {}", e))?;
+
+    let domain_list = manager.get_domain_list()
+        .map_err(|e| format!("获取域列表失败: {}", e))?;
+
+    // 将 (domain, count) 扁平列表转换为 DomainInfoDto
+    let result: Vec<DomainInfoDto> = domain_list
+        .into_iter()
+        .map(|(path, count)| DomainInfoDto {
+            path,
+            count,
+            children: Vec::new(),
+        })
+        .collect();
+
+    Ok(result)
 }
 
 // ============ 提示词增强配置命令 ============
@@ -673,3 +802,8 @@ pub async fn save_sou_config(
     log::info!("代码搜索配置已保存");
     Ok(())
 }
+
+// 集成测试模块
+#[cfg(test)]
+#[path = "commands_test.rs"]
+mod commands_test;

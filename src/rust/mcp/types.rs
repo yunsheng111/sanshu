@@ -39,6 +39,22 @@ pub struct MemoryConfigRequest {
     pub dedup_on_startup: Option<bool>,
     #[schemars(description = "启用去重检测")]
     pub enable_dedup: Option<bool>,
+
+    // v2.2 新增
+    #[schemars(description = "Write Guard 语义匹配阈值 (0.5~0.95)，>= 此值静默拒绝")]
+    pub write_guard_semantic_threshold: Option<f64>,
+    #[schemars(description = "Write Guard 更新匹配阈值 (0.3~0.8)，此值到语义阈值之间自动合并")]
+    pub write_guard_update_threshold: Option<f64>,
+    #[schemars(description = "活力衰减半衰期（天），默认 30")]
+    pub vitality_decay_half_life_days: Option<u32>,
+    #[schemars(description = "活力清理阈值 (0.0~1.0)，默认 0.35")]
+    pub vitality_cleanup_threshold: Option<f64>,
+    #[schemars(description = "不活跃天数阈值，默认 14")]
+    pub vitality_cleanup_inactive_days: Option<u32>,
+    #[schemars(description = "每次访问提升的活力值，默认 0.5")]
+    pub vitality_access_boost: Option<f64>,
+    #[schemars(description = "最大活力值，默认 3.0")]
+    pub vitality_max_score: Option<f64>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -64,6 +80,32 @@ pub struct JiyiRequest {
     #[schemars(description = "更新模式：replace(完全替换，默认) | append(追加内容)")]
     #[serde(default)]
     pub update_mode: Option<String>,
+    #[schemars(description = "URI 路径（分类操作时使用），格式: domain://path/segments")]
+    #[serde(default)]
+    pub uri_path: Option<String>,
+    #[schemars(description = "标签列表（分类操作时使用）")]
+    #[serde(default)]
+    pub tags: Option<Vec<String>>,
+    #[schemars(description = "待清理的记忆 ID 列表（执行清理操作时使用）")]
+    #[serde(default)]
+    pub cleanup_ids: Option<Vec<String>>,
+    // P3 新增：Token 效率参数
+    #[schemars(description = "是否返回详细内容（回忆操作时使用，默认 false 返回压缩格式）")]
+    #[serde(default)]
+    pub verbose: Option<bool>,
+    #[schemars(description = "页码（列表操作时使用，默认 1）")]
+    #[serde(default)]
+    pub page: Option<usize>,
+    #[schemars(description = "每页条数（列表操作时使用，默认 20）")]
+    #[serde(default)]
+    pub page_size: Option<usize>,
+    #[schemars(description = "是否仅返回摘要（列表操作时使用，默认 false）")]
+    #[serde(default)]
+    pub summary_only: Option<bool>,
+    // Task 2 新增：回滚快照操作参数
+    #[schemars(description = "目标版本号（回滚快照操作时必需）")]
+    #[serde(default)]
+    pub target_version: Option<u32>,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]

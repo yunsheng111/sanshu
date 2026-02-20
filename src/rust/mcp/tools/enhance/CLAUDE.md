@@ -6,7 +6,7 @@
 
 ## 模块职责
 
-提示词增强工具 (enhance)，通过调用 Augment chat-stream API 将口语化提示词转换为结构化专业提示词，支持流式响应、历史对话整合和项目上下文注入。
+提示词增强工具 (enhance)，通过统一 Chat 客户端将口语化提示词转换为结构化专业提示词。支持三级降级链（Ollama 本地 -> 云端 API -> 规则引擎）、流式响应、历史对话整合、项目上下文注入和结果缓存。
 
 ---
 
@@ -44,41 +44,134 @@ impl EnhanceTool {
 ### 请求参数
 ```rust
 pub struct EnhanceMcpRequest {
-    /// 原始提示词
-    pub prompt: String,
-
-    /// 项目根路径（用于上下文注入）
-    pub project_root_path: Option<String>,
+    pub prompt: String,                    // 原始提示词
+    pub project_root_path: Option<String>, // 项目根路径（用于上下文注入）
 }
 ```
 
-### 响应格式
-```markdown
-### 增强后的提示词
+---
 
-请优化登录页面的用户体验，具体要求：
+## 核心功能
 
-1. **UI 改进**：
-   - 使用现代化的表单设计
-   - 添加输入验证提示
-   - 优化移动端适配
+### 1. 统一 Chat 客户端 (`chat_client.rs`) - P1 新增
 
-2. **功能增强**：
-   - 添加"记住我"选项
-   - 实现密码可见性切换
-   - 添加第三方登录（Google, GitHub）
+支持多提供者的统一 Chat 接口，三段超时 + 懒构建 reqwest::Client。
 
-3. **安全性**：
-   - 实现 CSRF 保护
-   - 添加登录失败限制
-   - 使用 HTTPS
+```rust
+pub enum ChatProvider {
+    Ollama,        // 本地 Ollama
+    OpenAICompat,  // OpenAI / Grok / DeepSeek / SiliconFlow / Groq / Cloudflare
+    Gemini,        // Google Gemini 原生格式
+    Anthropic,     // Anthropic Claude 原生格式
+    RuleEngine,    // 纯规则降级（无 API）
+}
 
-4. **技术栈**：
-   - 前端：Vue 3 + Naive UI
-   - 后端：Rust + Tauri
-   - 认证：JWT Token
+pub struct ChatClient {
+    provider: ChatProvider,
+    base_url: String,
+    api_key: Option<String>,
+    model: String,
+}
+```
 
-请提供完整的实现方案和代码示例。
+### 2. 三级降级链 (`provider_factory.rs`) - P1 新增
+
+```
+L1: Ollama 本地 → 检测可用性 → 有则使用
+    |
+    v (不可用)
+L2: 云端 API → 读取配置中的 enhance_provider 和 enhance_api_key
+    |           支持：openai, grok, deepseek, siliconflow, groq, cloudflare, gemini, anthropic
+    v (不可用)
+L3: 规则引擎 → 10 条内置规则 → 正则匹配 → 模板增强
+```
+
+```rust
+/// 从配置构建 ChatClient
+pub fn build_enhance_client(config: &McpConfig) -> ChatClient
+```
+
+### 3. 规则引擎 (`rule_engine.rs`) - P1 新增
+
+无 API 时的纯规则降级增强，10 条内置规则覆盖常见场景：
+
+```rust
+pub struct RuleEnhancer {
+    rules: Vec<EnhanceRule>,     // 10 条内置规则
+    strategy: RuleMatchStrategy, // FirstMatch（默认）或 AllMatch
+}
+
+pub struct EnhanceRule {
+    pub trigger: Regex,    // 触发正则
+    pub template: String,  // 追加模板
+    pub priority: u32,     // 优先级
+}
+```
+
+**内置规则示例**：
+- `fix|bug|error` -> 追加诊断步骤模板
+- `test|测试` -> 追加测试策略模板
+- `性能|optimize` -> 追加性能分析模板
+
+### 4. 结果缓存 (`cache.rs`) - P1 新增
+
+LRU 缓存，减少重复增强请求的 API 调用。
+
+```rust
+pub struct EnhanceCache {
+    entries: HashMap<String, EnhanceCacheEntry>,
+    max_entries: usize,  // 默认 50
+    ttl: Duration,       // 默认 10 分钟
+}
+```
+
+**缓存策略**：
+- **缓存键**: 原始提示词的 hash
+- **淘汰策略**: LRU（最久未访问优先淘汰）
+- **过期策略**: TTL 10 分钟
+
+### 5. 提示词增强核心 (`core.rs`)
+
+```
+增强流程：
+1. 检查缓存 → 命中则直接返回
+2. 构建请求负载（加载历史 + 注入上下文 + zhi 历史摘要）
+3. 调用 ChatClient（三级降级链）
+4. 解析响应（提取 <augment-enhanced-prompt> 标签内容）
+5. 保存到缓存
+6. 保存历史对话
+7. 返回增强结果
+```
+
+### 6. 历史对话整合 (`history.rs`)
+
+- **存储位置**: `.sanshu-memory/enhance_history.json`
+- **最大条数**: 10
+- **功能**: 加载/保存/添加/清理历史对话
+
+### 7. 上下文注入
+
+增强请求自动注入：
+- 历史对话（最近 10 条）
+- zhi 交互历史摘要（最近 5 条）
+- 项目上下文（如提供 project_root_path）
+
+---
+
+## 数据流程
+
+### 增强流程（含缓存和降级）
+```
+AI 请求
+    → 检查 EnhanceCache
+    → [命中] 返回缓存结果
+    → [未命中] build_enhance_client(config)
+        → [L1] Ollama 本地 → 成功返回
+        → [L2] 云端 API → 成功返回
+        → [L3] RuleEnhancer → 规则增强返回
+    → 存入缓存
+    → 保存历史
+    → 返回增强结果
 ```
 
 ---
@@ -94,259 +187,34 @@ regex = "1.0"
 anyhow = "1.0"
 ```
 
-### 配置结构
+### 配置字段（McpConfig 扩展）
 ```rust
-pub struct EnhanceConfig {
-    /// Augment API 基础 URL
-    pub base_url: String,
+// Ollama 本地（L1）
+pub enhance_ollama_url: Option<String>,
+pub enhance_ollama_model: Option<String>,  // 默认 "qwen2.5-coder:7b"
 
-    /// API Token
-    pub token: String,
-
-    /// 项目根路径
-    pub project_root: Option<String>,
-}
-```
-
-### 默认配置
-- **base_url**: `https://api.augmentcode.com`
-- **token**: 从环境变量 `AUGMENT_TOKEN` 读取
-
----
-
-## 核心功能
-
-### 1. 提示词增强 (`core.rs`)
-
-#### 增强流程
-```rust
-pub struct PromptEnhancer {
-    base_url: String,
-    token: String,
-    client: Client,
-    project_root: Option<String>,
-}
-
-impl PromptEnhancer {
-    /// 增强提示词（流式响应）
-    pub async fn enhance_prompt(&self, prompt: &str) -> Result<String> {
-        // 1. 构建请求负载
-        let payload = self.build_payload(prompt).await?;
-
-        // 2. 调用 chat-stream API
-        let mut stream = self.call_chat_stream_api(payload).await?;
-
-        // 3. 解析流式响应
-        let enhanced = self.parse_stream_response(&mut stream).await?;
-
-        // 4. 提取增强内容
-        self.extract_enhanced_prompt(&enhanced)
-    }
-}
-```
-
-#### 系统提示词
-```rust
-const ENHANCE_SYSTEM_PROMPT: &str = r#"⚠️ NO TOOLS ALLOWED ⚠️
-
-Here is an instruction that I'd like to give you, but it needs to be improved.
-Rewrite and enhance this instruction to make it clearer, more specific, less ambiguous,
-and correct any mistakes. Do not use any tools: reply immediately with your answer.
-
-Reply with the following format:
-
-### BEGIN RESPONSE ###
-Here is an enhanced version of the original instruction:
-<augment-enhanced-prompt>enhanced prompt goes here</augment-enhanced-prompt>
-### END RESPONSE ###
-
-Here is my original instruction:
-"#;
-```
-
-### 2. 历史对话整合 (`history.rs`)
-
-#### 历史管理器
-```rust
-pub struct ChatHistoryManager {
-    history_dir: PathBuf,
-}
-
-impl ChatHistoryManager {
-    /// 加载历史对话
-    pub fn load_history(&self, project_root: &str) -> Result<Vec<ChatMessage>>
-
-    /// 保存历史对话
-    pub fn save_history(&self, project_root: &str, messages: &[ChatMessage]) -> Result<()>
-
-    /// 添加消息
-    pub fn add_message(&self, project_root: &str, role: &str, content: &str) -> Result<()>
-
-    /// 清理旧历史（保留最近 N 条）
-    pub fn cleanup_old_history(&self, project_root: &str, keep_count: usize) -> Result<()>
-}
-```
-
-#### 历史格式
-```rust
-pub struct ChatMessage {
-    pub role: String,      // "user" | "assistant"
-    pub content: String,
-    pub timestamp: String,
-}
-```
-
-#### 存储位置
-- **路径**: `.sanshu-memory/enhance_history.json`
-- **最大条数**: 10
-
-### 3. 上下文注入
-
-#### 项目上下文
-```rust
-async fn build_payload(&self, prompt: &str) -> Result<BuildPayloadResult> {
-    let mut messages = vec![
-        ChatMessage {
-            role: "system".to_string(),
-            content: ENHANCE_SYSTEM_PROMPT.to_string(),
-            timestamp: Utc::now().to_rfc3339(),
-        }
-    ];
-
-    // 1. 加载历史对话
-    if let Some(project_root) = &self.project_root {
-        let history = ChatHistoryManager::load_history(project_root)?;
-        messages.extend(history);
-    }
-
-    // 2. 添加当前提示词
-    messages.push(ChatMessage {
-        role: "user".to_string(),
-        content: prompt.to_string(),
-        timestamp: Utc::now().to_rfc3339(),
-    });
-
-    // 3. 注入 zhi 历史摘要
-    if let Some(project_root) = &self.project_root {
-        let zhi_summary = self.build_zhi_history_summary(project_root)?;
-        if !zhi_summary.is_empty() {
-            messages.insert(1, ChatMessage {
-                role: "system".to_string(),
-                content: format!("最近的交互历史：\n{}", zhi_summary),
-                timestamp: Utc::now().to_rfc3339(),
-            });
-        }
-    }
-
-    Ok(BuildPayloadResult {
-        payload: json!({ "messages": messages }),
-        history_diag: HistoryBuildDiagnostics::default(),
-    })
-}
-```
-
-#### zhi 历史摘要
-```rust
-fn build_zhi_history_summary(&self, project_root: &str) -> Result<String> {
-    let zhi_history = ZhiHistoryManager::load_history(project_root)?;
-
-    // 保留最近 5 条
-    let recent = zhi_history.iter().rev().take(5);
-
-    let mut summary = String::new();
-    for entry in recent {
-        summary.push_str(&format!(
-            "- [{}] {}\n  响应: {}\n",
-            entry.timestamp,
-            truncate(&entry.message, 200),
-            truncate(&entry.response, 200)
-        ));
-    }
-
-    Ok(summary)
-}
-```
-
-### 4. 流式响应解析
-
-#### SSE 解析
-```rust
-async fn parse_stream_response(&self, stream: &mut impl Stream<Item = Result<Bytes>>) -> Result<String> {
-    let mut full_response = String::new();
-
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk?;
-        let text = String::from_utf8_lossy(&chunk);
-
-        // 解析 SSE 格式
-        for line in text.lines() {
-            if line.starts_with("data: ") {
-                let data = &line[6..];
-                if data == "[DONE]" {
-                    break;
-                }
-
-                // 解析 JSON
-                if let Ok(json) = serde_json::from_str::<Value>(data) {
-                    if let Some(content) = json["choices"][0]["delta"]["content"].as_str() {
-                        full_response.push_str(content);
-                    }
-                }
-            }
-        }
-    }
-
-    Ok(full_response)
-}
-```
-
-#### 内容提取
-```rust
-fn extract_enhanced_prompt(&self, response: &str) -> Result<String> {
-    // 提取 <augment-enhanced-prompt> 标签内容
-    let re = Regex::new(r"<augment-enhanced-prompt>(.*?)</augment-enhanced-prompt>")?;
-
-    if let Some(captures) = re.captures(response) {
-        Ok(captures[1].trim().to_string())
-    } else {
-        // 降级：返回整个响应
-        Ok(response.trim().to_string())
-    }
-}
-```
-
----
-
-## 数据流程
-
-### 增强流程
-```
-AI 请求 → 加载历史 → 注入上下文 → 调用 API → 解析流式响应 → 提取增强内容 → 保存历史 → 返回结果
-```
-
-### 历史管理
-```
-增强请求 → 加载历史 → 添加到上下文 → 增强完成 → 保存新历史 → 清理旧历史
+// 云端 API（L2）
+pub enhance_provider: Option<String>,      // "openai", "gemini", "anthropic" 等
+pub enhance_api_key: Option<String>,
+pub enhance_model: Option<String>,
+pub enhance_base_url: Option<String>,
 ```
 
 ---
 
 ## 常见问题 (FAQ)
 
-### Q: 如何配置 API Token？
-A: 设置环境变量 `AUGMENT_TOKEN` 或在配置文件中设置 `enhance_config.token`
+### Q: 如何配置 Ollama 本地增强？
+A: 设置 `enhance_ollama_url`（如 `http://localhost:11434`）和 `enhance_ollama_model`
 
-### Q: 历史对话保留多少条？
-A: 默认保留最近 10 条
+### Q: 没有 API 怎么使用增强？
+A: 系统会自动降级到规则引擎（L3），使用 10 条内置规则进行结构化增强
 
-### Q: 如何禁用历史对话？
-A: 不提供 `project_root_path` 参数
+### Q: 缓存如何清理？
+A: 缓存 10 分钟自动过期，或重启 MCP 服务器清空
 
-### Q: 支持哪些语言？
-A: 支持所有语言，但增强效果以英文最佳
-
-### Q: 如何查看增强历史？
-A: 查看 `.sanshu-memory/enhance_history.json`
+### Q: 支持哪些云端 API？
+A: OpenAI、Grok(xAI)、DeepSeek、SiliconFlow、Groq、Cloudflare、Gemini、Anthropic
 
 ---
 
@@ -354,10 +222,15 @@ A: 查看 `.sanshu-memory/enhance_history.json`
 
 ### 核心文件
 - `core.rs` - 提示词增强核心逻辑
+- `chat_client.rs` - P1 统一 Chat 客户端（多提供者）
+- `provider_factory.rs` - P1 三级降级链工厂
+- `rule_engine.rs` - P1 规则引擎（10 条内置规则）
+- `cache.rs` - P1 结果缓存（LRU + TTL）
 - `history.rs` - 历史对话管理
 - `mcp.rs` - MCP 工具实现
 - `types.rs` - 数据类型定义
 - `commands.rs` - Tauri 命令
+- `utils.rs` - 工具函数
 - `mod.rs` - 模块导出
 
 ### 数据文件
@@ -365,28 +238,4 @@ A: 查看 `.sanshu-memory/enhance_history.json`
 
 ---
 
-## 使用示例
-
-### 基础增强
-```rust
-let request = EnhanceMcpRequest {
-    prompt: "帮我优化一下登录页面".to_string(),
-    project_root_path: Some("/path/to/project".to_string()),
-};
-
-let result = EnhanceTool::enhance(request).await?;
-```
-
-### 无上下文增强
-```rust
-let request = EnhanceMcpRequest {
-    prompt: "写一个快速排序算法".to_string(),
-    project_root_path: None,
-};
-
-let result = EnhanceTool::enhance(request).await?;
-```
-
----
-
-**最后更新**: 2026-02-18
+**最后更新**: 2026-02-19

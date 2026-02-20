@@ -86,7 +86,7 @@ impl InteractionTool {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    
 
     #[test]
     fn test_zhi_request_validation() {
@@ -103,7 +103,7 @@ mod tests {
     #[test]
     fn test_parse_mcp_response() {
         // 测试响应解析
-        let response = r#"{"selected_option": "选项1"}"#;
+        let _response = r#"{"selected_option": "选项1"}"#;
         // 验证解析结果
     }
 }
