@@ -7,10 +7,13 @@
  * - #tag 前缀按标签过滤
  * - 300ms debounce 实时搜索
  * - 正则解析前缀，失败时降级为纯全文搜索
+ * - FTS5 全文搜索 + 超时降级提示
+ * - 虚拟滚动（结果 >50 条）
  */
-import { invoke } from '@tauri-apps/api/core'
 import { useMessage } from 'naive-ui'
 import { computed, onUnmounted, ref, watch } from 'vue'
+import HighlightText from '../HighlightText.vue'
+import { useMemorySearch, type MemorySearchResult } from '@/composables/useMemorySearch'
 
 // Props
 const props = defineProps<{
@@ -19,24 +22,22 @@ const props = defineProps<{
 
 // Emits
 const emit = defineEmits<{
-  (e: 'select', memory: SearchResult): void
-  (e: 'edit', memory: SearchResult): void
+  (e: 'select', memory: MemorySearchResult): void
+  (e: 'edit', memory: MemorySearchResult): void
   (e: 'delete', memoryId: string): void
 }>()
 
 const message = useMessage()
 
-// 类型定义
-interface SearchResult {
-  id: string
-  content: string
-  category: string
-  created_at: string
-  relevance: number
-  highlight: string
-  domain?: string
-  tags?: string[]
-}
+// 使用 useMemorySearch composable
+const {
+  results: searchResults,
+  metadata,
+  loading: isSearching,
+  searchMode,
+  search: performSearch,
+  clearResults,
+} = useMemorySearch()
 
 /** 解析后的搜索参数 */
 interface ParsedQuery {
@@ -51,12 +52,13 @@ interface ParsedQuery {
 // 状态
 const query = ref('')
 const selectedCategory = ref<string | null>(null)
-const loading = ref(false)
-const results = ref<SearchResult[]>([])
 const hasSearched = ref(false)
 
 /** debounce 定时器 */
 let debounceTimer: ReturnType<typeof setTimeout> | null = null
+
+// 本地结果引用（用于兼容现有模板）
+const results = computed(() => searchResults.value)
 
 // 分类选项
 const categoryOptions = [
@@ -137,27 +139,22 @@ async function search() {
     return
   }
 
-  loading.value = true
   hasSearched.value = true
 
   try {
     const parsed = parseQuery(trimmed)
 
-    const res = await invoke<SearchResult[]>('search_memories', {
-      projectPath: props.projectRootPath,
+    // 使用 useMemorySearch composable
+    await performSearch({
       query: parsed.text || trimmed, // 如果解析后无文本，用原始输入
-      category: selectedCategory.value,
-      domain: parsed.domain,
+      category: selectedCategory.value || undefined,
+      domain: parsed.domain || undefined,
       tags: parsed.tags.length > 0 ? parsed.tags : undefined,
+      limit: 50, // 默认限制 50 条
     })
-    results.value = res
   }
   catch (err) {
     message.error(`搜索失败: ${err}`)
-    results.value = []
-  }
-  finally {
-    loading.value = false
   }
 }
 
@@ -178,7 +175,7 @@ function manualSearch() {
 // 清空搜索
 function clearSearch() {
   query.value = ''
-  results.value = []
+  clearResults()
   hasSearched.value = false
   if (debounceTimer) {
     clearTimeout(debounceTimer)
@@ -195,7 +192,7 @@ watch(query, (newVal) => {
 
   if (!newVal.trim()) {
     // 输入清空时直接清除结果
-    results.value = []
+    clearResults()
     hasSearched.value = false
     return
   }
@@ -311,7 +308,7 @@ defineExpose({
           aria-label="分类筛选"
         />
 
-        <n-button type="primary" :loading="loading" class="search-btn" @click="manualSearch">
+        <n-button type="primary" :loading="isSearching" class="search-btn" @click="manualSearch">
           搜索
         </n-button>
       </div>
@@ -350,7 +347,7 @@ defineExpose({
     <!-- 搜索结果 -->
     <div class="search-results" role="region" aria-live="polite" aria-label="搜索结果">
       <!-- 加载状态 -->
-      <div v-if="loading" class="loading-state" aria-busy="true">
+      <div v-if="isSearching" class="loading-state" aria-busy="true">
         <n-spin size="medium" />
         <span class="loading-text">搜索中...</span>
       </div>
@@ -370,13 +367,129 @@ defineExpose({
 
       <!-- 结果列表 -->
       <template v-else-if="hasResults">
+        <!-- 超时降级提示 -->
+        <n-alert v-if="searchMode === 'fuzzy'" type="warning" closable class="degradation-alert">
+          <template #icon>
+            <div class="i-carbon-warning" />
+          </template>
+          当前搜索响应较慢，已为您切换至基础匹配模式
+        </n-alert>
+
         <div class="result-header">
           <span class="result-count" role="status">
             找到 <strong>{{ results.length }}</strong> 条结果
           </span>
+          <!-- 搜索模式指示器 -->
+          <n-tag v-if="searchMode === 'fts5'" type="success" size="small" :bordered="false">
+            <template #icon>
+              <div class="i-carbon-search-advanced" />
+            </template>
+            FTS5 全文搜索
+          </n-tag>
+          <n-tag v-else type="default" size="small" :bordered="false">
+            <template #icon>
+              <div class="i-carbon-search" />
+            </template>
+            模糊匹配
+          </n-tag>
         </div>
 
-        <div class="result-list" role="listbox" aria-label="搜索结果列表">
+        <!-- 虚拟滚动（结果 >50 条） -->
+        <n-virtual-list
+          v-if="results.length > 50"
+          :items="results"
+          :item-size="120"
+          style="max-height: 600px"
+          class="result-list"
+        >
+          <template #default="{ item }">
+            <div
+              :key="item.id"
+              class="result-item"
+              role="option"
+              :aria-selected="false"
+              :tabindex="0"
+              @click="emit('select', item)"
+              @keyup.enter="emit('select', item)"
+            >
+              <!-- 左侧色条 -->
+              <div
+                class="result-accent"
+                :style="{ background: getCategoryAccentColor(item.category) }"
+              />
+
+              <div class="result-body">
+                <!-- 头部：分类 + 相关度 + 搜索模式 -->
+                <div class="result-meta">
+                  <div class="result-category">
+                    <span class="category-badge" :class="[getCategoryBgClass(item.category)]">
+                      <div :class="getCategoryIcon(item.category)" aria-hidden="true" />
+                      {{ item.category }}
+                    </span>
+                    <n-tag v-if="item.domain" size="tiny" :bordered="false" type="info" class="domain-tag">
+                      {{ item.domain }}
+                    </n-tag>
+                  </div>
+                  <n-tag v-if="item.relevance" :type="getRelevanceType(item.relevance)" size="small" :bordered="false" class="relevance-tag">
+                    {{ formatRelevance(item.relevance) }}
+                  </n-tag>
+                </div>
+
+                <!-- 高亮内容（使用 HighlightText 组件） -->
+                <div class="result-highlight">
+                  <HighlightText :snippet="item.highlighted_snippet || item.content" />
+                </div>
+
+                <!-- 标签 -->
+                <div v-if="item.tags && item.tags.length > 0" class="result-tags">
+                  <n-tag
+                    v-for="tag in item.tags"
+                    :key="tag"
+                    size="tiny"
+                    :bordered="false"
+                    round
+                  >
+                    {{ tag }}
+                  </n-tag>
+                </div>
+
+                <!-- 底部：时间 + 操作 -->
+                <div class="result-footer">
+                  <span class="result-time">{{ formatDate(item.created_at) }}</span>
+                  <div class="result-actions">
+                    <n-button
+                      text
+                      type="primary"
+                      size="tiny"
+                      aria-label="编辑此记忆"
+                      @click.stop="emit('edit', item)"
+                    >
+                      <template #icon>
+                        <div class="i-carbon-edit" aria-hidden="true" />
+                      </template>
+                      编辑
+                    </n-button>
+                    <n-button
+                      text
+                      type="error"
+                      size="tiny"
+                      aria-label="删除此记忆"
+                      @click.stop="emit('delete', item.id)"
+                    >
+                      <template #icon>
+                        <div class="i-carbon-trash-can" aria-hidden="true" />
+                      </template>
+                      删除
+                    </n-button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </template>
+        </n-virtual-list>
+
+        <!-- 普通列表（结果 ≤50 条） -->
+        <div v-else class="result-list" role="listbox" aria-label="搜索结果列表">
           <div
             v-for="(item, index) in results"
             :key="item.id"
@@ -405,14 +518,14 @@ defineExpose({
                     {{ item.domain }}
                   </n-tag>
                 </div>
-                <n-tag :type="getRelevanceType(item.relevance)" size="small" :bordered="false" class="relevance-tag">
+                <n-tag v-if="item.relevance" :type="getRelevanceType(item.relevance)" size="small" :bordered="false" class="relevance-tag">
                   {{ formatRelevance(item.relevance) }}
                 </n-tag>
               </div>
 
-              <!-- 高亮内容 -->
+              <!-- 高亮内容（使用 HighlightText 组件） -->
               <div class="result-highlight">
-                {{ item.highlight }}
+                <HighlightText :snippet="item.highlighted_snippet || item.content" />
               </div>
 
               <!-- 标签 -->
@@ -484,6 +597,11 @@ defineExpose({
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+
+/* 降级提示 */
+.degradation-alert {
+  margin-bottom: 14px;
 }
 
 /* 搜索栏容器 */
@@ -672,6 +790,7 @@ defineExpose({
   align-items: center;
   justify-content: space-between;
   margin-bottom: 14px;
+  gap: 12px;
 }
 
 .result-count {
