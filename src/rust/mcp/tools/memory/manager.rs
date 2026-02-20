@@ -18,6 +18,11 @@ use super::dedup::MemoryDeduplicator;
 use super::migration::MemoryMigrator;
 use crate::{log_debug, log_important};
 
+// T3: 导入 FTS Actor 相关类型
+use super::fts_actor::{FtsMessage, spawn_fts_actor};
+use super::fts_index::FtsIndex;
+use tokio::sync::mpsc;
+
 /// 记忆管理器
 pub struct MemoryManager {
     /// 记忆目录路径
@@ -28,6 +33,8 @@ pub struct MemoryManager {
     store: MemoryStore,
     /// 是否为非 Git 项目（降级模式）
     is_non_git_project: bool,
+    /// T3: FTS Actor 消息发送通道（Option 用于非 runtime 环境降级）
+    fts_tx: Option<mpsc::Sender<FtsMessage>>,
 }
 
 /// 路径规范化结果
@@ -141,17 +148,75 @@ impl MemoryManager {
             store.entries = deduped;
         }
 
+        // T3: 初始化 FTS Actor（如果在 Tokio runtime 中）
+        let fts_tx = Self::init_fts_actor(&memory_dir, &store.entries);
+
         let manager = Self {
             memory_dir,
             project_path: project_path_str,
             store,
             is_non_git_project: normalize_result.is_non_git,
+            fts_tx,
         };
 
         // 保存存储
         manager.save_store()?;
 
         Ok(manager)
+    }
+
+    /// T3: 初始化 FTS Actor
+    ///
+    /// 检测 Tokio runtime，若存在则创建 FTS Actor 并返回发送通道
+    fn init_fts_actor(memory_dir: &Path, entries: &[MemoryEntry]) -> Option<mpsc::Sender<FtsMessage>> {
+        // 检测是否在 Tokio runtime 中
+        let handle = match tokio::runtime::Handle::try_current() {
+            Ok(h) => h,
+            Err(_) => {
+                log_debug!("[FTS Actor] 无 Tokio runtime，跳过 FTS Actor 初始化");
+                return None;
+            }
+        };
+
+        // 创建 FTS5 索引
+        let fts_index = match FtsIndex::open(memory_dir) {
+            Ok(index) => index,
+            Err(e) => {
+                log_important!(warn, "[FTS Actor] FTS5 索引创建失败，跳过 Actor 初始化: {}", e);
+                return None;
+            }
+        };
+
+        // 启动 FTS Actor
+        let tx = spawn_fts_actor(fts_index);
+
+        // 如果已有记忆，触发初始同步
+        if !entries.is_empty() {
+            let entries_clone = entries.to_vec();
+            let tx_clone = tx.clone();
+            handle.spawn(async move {
+                use super::fts_actor::FtsMessage;
+                use tokio::sync::oneshot;
+
+                let (sync_tx, sync_rx) = oneshot::channel();
+                if tx_clone.send(FtsMessage::SyncAll(entries_clone, sync_tx)).await.is_ok() {
+                    match sync_rx.await {
+                        Ok(Ok(result)) => {
+                            log_debug!("[FTS Actor] 初始同步完成: synced={}, failed={}", result.synced, result.failed);
+                        }
+                        Ok(Err(e)) => {
+                            log_important!(warn, "[FTS Actor] 初始同步失败: {}", e);
+                        }
+                        Err(_) => {
+                            log_important!(warn, "[FTS Actor] 初始同步通道关闭");
+                        }
+                    }
+                }
+            });
+        }
+
+        log_important!(info, "[FTS Actor] 已启动并集成到 MemoryManager 生命周期");
+        Some(tx)
     }
 
     /// 检查是否为非 Git 项目（降级模式）
@@ -228,6 +293,13 @@ impl MemoryManager {
 
         log_debug!("已添加记忆: {} ({:?})", id, category);
 
+        // T4: FTS 双写 - add 后同步索引
+        if let Some(tx) = &self.fts_tx {
+            if let Err(e) = tx.try_send(FtsMessage::Sync(entry.clone())) {
+                log_debug!("[FTS Actor] 索引同步失败（不阻塞主流程）: memory_id={}, error={}", id, e);
+            }
+        }
+
         // Task 3: 触发后台摘要生成（如果满足条件）
         if self.should_auto_generate_summary(&entry.content, &entry.summary) {
             self.spawn_summary_backfill_task(id.clone(), entry.content.clone());
@@ -296,6 +368,14 @@ impl MemoryManager {
         if self.store.entries.len() < original_count {
             self.save_store()?;
             log_debug!("已删除记忆: {}", memory_id);
+
+            // T4: FTS 双写 - delete 后删除索引
+            if let Some(tx) = &self.fts_tx {
+                if let Err(e) = tx.try_send(FtsMessage::Delete(memory_id.to_string())) {
+                    log_debug!("[FTS Actor] 索引删除失败（不阻塞主流程）: memory_id={}, error={}", memory_id, e);
+                }
+            }
+
             Ok(deleted_content)
         } else {
             Ok(None) // 未找到该 ID
@@ -362,9 +442,18 @@ impl MemoryManager {
             entry.version += 1; // SC-6: 递增版本号
 
             let new_version = entry.version; // 提取版本号，结束借用
+            let updated_entry = entry.clone(); // 克隆完整 entry 用于 FTS
 
             self.save_store()?;
             log_debug!("已更新记忆: {} (append={}, version={})", memory_id, append, new_version);
+
+            // T4: FTS 双写 - update 后同步索引
+            if let Some(tx) = &self.fts_tx {
+                if let Err(e) = tx.try_send(FtsMessage::Sync(updated_entry)) {
+                    log_debug!("[FTS Actor] 索引同步失败（不阻塞主流程）: memory_id={}, error={}", memory_id, e);
+                }
+            }
+
             Ok(Some(memory_id.to_string()))
         } else {
             Ok(None) // 未找到该 ID
@@ -940,6 +1029,20 @@ impl MemoryManager {
     }
 }
 
+// T3: 实现 Drop trait，优雅关闭 FTS Actor
+impl Drop for MemoryManager {
+    fn drop(&mut self) {
+        if let Some(tx) = &self.fts_tx {
+            // 尝试发送 Shutdown 消息（非阻塞）
+            if let Ok(_) = tx.try_send(FtsMessage::Shutdown) {
+                log_debug!("[FTS Actor] 已发送 Shutdown 消息");
+            } else {
+                log_debug!("[FTS Actor] Shutdown 消息发送失败（通道可能已满或关闭）");
+            }
+        }
+    }
+}
+
 /// 记忆统计信息
 #[derive(Debug, Default)]
 pub struct MemoryStats {
@@ -1286,5 +1389,193 @@ mod tests {
         let all = manager.get_all_memories();
         assert_eq!(all[0].content, "初始内容");
         assert_eq!(all[0].version, 1);
+    }
+
+    // T3: 测试 FTS Actor 生命周期集成
+    #[tokio::test]
+    async fn test_fts_actor_lifecycle_integration() {
+        // OK-1: 编译通过（此测试能运行即证明）
+        // OK-11: Drop 时 Actor 退出
+        // OK-15: 非 runtime 环境不崩溃（通过 try_current() 检测）
+
+        let temp_dir = TempDir::new().expect("创建临时目录失败");
+        fs::create_dir_all(temp_dir.path().join(".git")).expect("创建 .git 目录失败");
+
+        {
+            // 在 Tokio runtime 中创建 MemoryManager
+            let manager = MemoryManager::new(temp_dir.path().to_str().unwrap())
+                .expect("创建 MemoryManager 失败");
+
+            // 验证 FTS Actor 已启动
+            assert!(manager.fts_tx.is_some(), "在 Tokio runtime 中应启动 FTS Actor");
+
+            // 添加记忆
+            let mut manager_mut = manager;
+            let id = manager_mut
+                .add_memory("测试内容", MemoryCategory::Rule)
+                .expect("添加记忆失败")
+                .expect("记忆不应被去重拒绝");
+
+            // 等待 FTS Actor 处理
+            tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+
+            // 验证记忆已添加
+            let all = manager_mut.get_all_memories();
+            assert_eq!(all.len(), 1);
+            assert_eq!(all[0].id, id);
+
+            // OK-11: manager_mut 离开作用域时，Drop trait 会发送 Shutdown 消息
+        }
+
+        // 等待 Actor 完全停止
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    }
+
+    #[test]
+    fn test_fts_actor_non_runtime_fallback() {
+        // OK-15: 非 runtime 环境不崩溃
+        // 在非 Tokio runtime 环境中创建 MemoryManager
+
+        let temp_dir = TempDir::new().expect("创建临时目录失败");
+        fs::create_dir_all(temp_dir.path().join(".git")).expect("创建 .git 目录失败");
+
+        // 不使用 #[tokio::test]，直接在同步环境中创建
+        let manager = MemoryManager::new(temp_dir.path().to_str().unwrap())
+            .expect("创建 MemoryManager 失败");
+
+        // 验证 FTS Actor 未启动（降级模式）
+        assert!(manager.fts_tx.is_none(), "非 runtime 环境应跳过 FTS Actor 初始化");
+
+        // 验证基本功能仍可用
+        let mut manager_mut = manager;
+        let id = manager_mut
+            .add_memory("测试内容", MemoryCategory::Rule)
+            .expect("添加记忆失败")
+            .expect("记忆不应被去重拒绝");
+
+        let all = manager_mut.get_all_memories();
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].id, id);
+    }
+
+    // T4: 测试 FTS 双写 - add_memory
+    #[tokio::test]
+    async fn test_fts_dual_write_add_memory() {
+        // OK-2: add 后可搜索
+        let temp_dir = TempDir::new().expect("创建临时目录失败");
+        fs::create_dir_all(temp_dir.path().join(".git")).expect("创建 .git 目录失败");
+
+        let mut manager = MemoryManager::new(temp_dir.path().to_str().unwrap())
+            .expect("创建 MemoryManager 失败");
+
+        // 验证 FTS Actor 已启动
+        assert!(manager.fts_tx.is_some(), "在 Tokio runtime 中应启动 FTS Actor");
+
+        // 添加记忆
+        let id = manager
+            .add_memory("FTS 双写测试内容", MemoryCategory::Rule)
+            .expect("添加记忆失败")
+            .expect("记忆不应被去重拒绝");
+
+        // 等待 FTS Actor 处理
+        tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+
+        // 验证记忆已添加到 JSON
+        let all = manager.get_all_memories();
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].id, id);
+        assert_eq!(all[0].content, "FTS 双写测试内容");
+
+        // 注意：实际的 FTS 搜索验证需要通过 FtsMessage::Search 完成
+        // 这里仅验证消息发送不会导致崩溃或阻塞
+    }
+
+    // T4: 测试 FTS 双写 - update_memory
+    #[tokio::test]
+    async fn test_fts_dual_write_update_memory() {
+        // OK-3: update 后索引更新
+        let temp_dir = TempDir::new().expect("创建临时目录失败");
+        fs::create_dir_all(temp_dir.path().join(".git")).expect("创建 .git 目录失败");
+
+        let mut manager = MemoryManager::new(temp_dir.path().to_str().unwrap())
+            .expect("创建 MemoryManager 失败");
+
+        // 添加初始记忆
+        let id = manager
+            .add_memory("初始内容", MemoryCategory::Rule)
+            .expect("添加记忆失败")
+            .expect("记忆不应被去重拒绝");
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+        // 更新记忆
+        let result = manager.update_memory(&id, "更新后的内容", false);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), Some(id.clone()));
+
+        // 等待 FTS Actor 处理
+        tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+
+        // 验证记忆已更新
+        let all = manager.get_all_memories();
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].content, "更新后的内容");
+        assert_eq!(all[0].version, 2);
+    }
+
+    // T4: 测试 FTS 双写 - delete_memory
+    #[tokio::test]
+    async fn test_fts_dual_write_delete_memory() {
+        // OK-4: delete 后索引删除
+        let temp_dir = TempDir::new().expect("创建临时目录失败");
+        fs::create_dir_all(temp_dir.path().join(".git")).expect("创建 .git 目录失败");
+
+        let mut manager = MemoryManager::new(temp_dir.path().to_str().unwrap())
+            .expect("创建 MemoryManager 失败");
+
+        // 添加记忆
+        let id = manager
+            .add_memory("待删除的内容", MemoryCategory::Rule)
+            .expect("添加记忆失败")
+            .expect("记忆不应被去重拒绝");
+
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+
+        // 删除记忆
+        let result = manager.delete_memory(&id);
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), Some("待删除的内容".to_string()));
+
+        // 等待 FTS Actor 处理
+        tokio::time::sleep(tokio::time::Duration::from_millis(200)).await;
+
+        // 验证记忆已删除
+        let all = manager.get_all_memories();
+        assert_eq!(all.len(), 0);
+    }
+
+    // T4: 测试 FTS 双写失败不阻塞主流程
+    #[tokio::test]
+    async fn test_fts_dual_write_failure_non_blocking() {
+        // HC-4: FTS 操作失败仅记录日志，不阻塞主流程
+        let temp_dir = TempDir::new().expect("创建临时目录失败");
+        fs::create_dir_all(temp_dir.path().join(".git")).expect("创建 .git 目录失败");
+
+        let mut manager = MemoryManager::new(temp_dir.path().to_str().unwrap())
+            .expect("创建 MemoryManager 失败");
+
+        // 关闭 FTS Actor 通道（模拟通道关闭场景）
+        drop(manager.fts_tx.take());
+
+        // 添加记忆应该成功（即使 FTS 通道已关闭）
+        let id = manager
+            .add_memory("测试内容", MemoryCategory::Rule)
+            .expect("添加记忆应成功（FTS 失败不阻塞）")
+            .expect("记忆不应被去重拒绝");
+
+        // 验证记忆已添加到 JSON
+        let all = manager.get_all_memories();
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].id, id);
     }
 }

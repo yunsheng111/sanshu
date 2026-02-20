@@ -50,7 +50,8 @@ export function parseFts5Snippet(snippet: string): SnippetPart[] {
 
     parts.forEach((text, originalIndex) => {
       // 跳过空字符串
-      if (text.length === 0) return
+      if (text.length === 0)
+        return
 
       result.push({
         text, // 保留原始文本，由 Vue h() 自动转义

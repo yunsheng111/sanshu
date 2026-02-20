@@ -68,7 +68,7 @@ export function useMemorySearch() {
   const searchMode = ref<'fuzzy' | 'fts5'>('fuzzy')
 
   /** 是否启用 FTS5（已启用） */
-  const useFts5 = ref(true)
+  const useFts5 = ref(true) // 启用 FTS5 搜索
 
   /** 中文 IME 组合输入状态 */
   const isComposing = ref(false)
@@ -205,25 +205,39 @@ export function useMemorySearch() {
 
   /**
    * FTS5 全文搜索
+   * 调用后端 search_memories 命令，解析返回的 search_mode 字段
    */
   async function searchFts5(options: MemorySearchOptions): Promise<MemorySearchResult[] | null> {
-    const result = await safeInvoke<MemorySearchResult[]>('search_memories', {
-      query: options.query,
-      category: options.category,
-      domain: options.domain,
-      tags: options.tags,
-      limit: options.limit ?? 20,
-    })
+    try {
+      const result = await safeInvoke<MemorySearchResult[]>('search_memories', {
+        query: options.query,
+        category: options.category,
+        domain: options.domain,
+        tags: options.tags,
+        limit: options.limit ?? 20,
+      })
 
-    if (result && result.length > 0) {
-      // 解析后端返回的 search_mode 字段
-      const firstResult = result[0]
-      if (firstResult.search_mode) {
-        searchMode.value = firstResult.search_mode === 'fts5' ? 'fts5' : 'fuzzy'
+      if (result && result.length > 0) {
+        // 解析后端返回的 search_mode 字段（根据接口契约）
+        const firstResult = result[0]
+        if (firstResult.search_mode) {
+          // 更新搜索模式状态（用于 UI 指示器）
+          searchMode.value = firstResult.search_mode === 'fts5' ? 'fts5' : 'fuzzy'
+        }
       }
-    }
+      else {
+        // 空结果时重置为默认模式
+        searchMode.value = 'fuzzy'
+      }
 
-    return result
+      return result
+    }
+    catch (error) {
+      console.error('[useMemorySearch] FTS5 搜索失败:', error)
+      // 搜索失败时重置模式
+      searchMode.value = 'fuzzy'
+      throw error
+    }
   }
 
   /**

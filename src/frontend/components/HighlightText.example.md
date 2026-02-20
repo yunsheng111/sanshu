@@ -38,8 +38,8 @@ const snippet = '这是一个<mark>测试</mark>片段'
 
 ```vue
 <script setup lang="ts">
-import { useMemorySearch } from '@/composables/useMemorySearch'
 import HighlightText from '@/components/HighlightText.vue'
+import { useMemorySearch } from '@/composables/useMemorySearch'
 
 const { results, searchMode } = useMemorySearch()
 </script>
@@ -74,7 +74,9 @@ const { results, searchMode } = useMemorySearch()
 
 <!-- 输出（安全） -->
 <!-- <script> 标签被转义，无法执行 -->
-&lt;script&gt;alert("xss")&lt;/script&gt;<span class="highlight">测试</span>
+&lt;script&gt;alert("xss")&lt;/script&gt;<span class="highlight">
+测试
+</span>
 ```
 
 ## API
