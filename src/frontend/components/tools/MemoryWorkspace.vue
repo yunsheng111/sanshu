@@ -1,4 +1,8 @@
 <script setup lang="ts">
+import type { VitalityData } from '../../composables/useVitalityDecay'
+import { useMessage } from 'naive-ui'
+import { computed, inject, onMounted, ref, watch } from 'vue'
+import { useProgressiveDisclosure } from '../../composables/useProgressiveDisclosure'
 /**
  * 记忆工作区组件
  * 包含 SearchBar + TagFilter + 记忆卡片列表 + VitalityBadge
@@ -6,15 +10,11 @@
  * 记忆数 > 100 条时自动启用虚拟滚动
  */
 import { useSafeInvoke } from '../../composables/useSafeInvoke'
-import { useProgressiveDisclosure, type DisclosureState } from '../../composables/useProgressiveDisclosure'
-import type { VitalityData } from '../../composables/useVitalityDecay'
-import { useMessage } from 'naive-ui'
-import { computed, inject, onMounted, ref, watch } from 'vue'
+import BatchActionBar from './BatchActionBar.vue'
+import { MEMORY_BATCH_MODE_KEY, MEMORY_DOMAIN_KEY, MEMORY_SELECTED_IDS_KEY } from './memoryKeys'
+import SnapshotDiff from './SnapshotDiff.vue'
 import TagFilter from './TagFilter.vue'
 import VitalityBadge from './VitalityBadge.vue'
-import BatchActionBar from './BatchActionBar.vue'
-import SnapshotDiff from './SnapshotDiff.vue'
-import { MEMORY_DOMAIN_KEY, MEMORY_BATCH_MODE_KEY, MEMORY_SELECTED_IDS_KEY } from './memoryKeys'
 
 // Props
 const props = defineProps<{
@@ -104,15 +104,15 @@ const filteredMemories = computed(() => {
   if (searchQuery.value.trim()) {
     const keyword = searchQuery.value.trim().toLowerCase()
     list = list.filter(m =>
-      m.content.toLowerCase().includes(keyword) ||
-      m.category.toLowerCase().includes(keyword) ||
-      (m.tags && m.tags.some(t => t.toLowerCase().includes(keyword)))
+      m.content.toLowerCase().includes(keyword)
+      || m.category.toLowerCase().includes(keyword)
+      || (m.tags && m.tags.some(t => t.toLowerCase().includes(keyword))),
     )
   }
 
   // 按标签筛选
   if (selectedTags.value.length > 0) {
-    list = list.filter(m => {
+    list = list.filter((m) => {
       const memoryTags = [...(m.tags || []), m.category]
       return selectedTags.value.some(t => memoryTags.includes(t))
     })
@@ -162,7 +162,8 @@ function handleToggle(id: string) {
   // 如果进入 detail 态，记录当前查看的记忆
   if (disclosure.getState(id) === 'detail') {
     detailMemoryId.value = id
-  } else {
+  }
+  else {
     if (detailMemoryId.value === id) {
       detailMemoryId.value = null
     }
@@ -175,7 +176,8 @@ function toggleSelect(id: string) {
   const index = ids.indexOf(id)
   if (index >= 0) {
     ids.splice(index, 1)
-  } else {
+  }
+  else {
     ids.push(id)
   }
   selectedMemoryIds.value = ids
@@ -198,17 +200,18 @@ async function handleBatchComplete() {
 
 /** 截取内容预览（100字） */
 function getPreview(content: string, maxLen = 100): string {
-  if (content.length <= maxLen) return content
-  return content.slice(0, maxLen) + '...'
+  if (content.length <= maxLen)
+    return content
+  return `${content.slice(0, maxLen)}...`
 }
 
 /** 获取分类图标 */
 function getCategoryIcon(category: string): string {
   const icons: Record<string, string> = {
-    '规范': 'i-carbon-rule',
-    '偏好': 'i-carbon-user-favorite',
-    '模式': 'i-carbon-flow',
-    '背景': 'i-carbon-document',
+    规范: 'i-carbon-rule',
+    偏好: 'i-carbon-user-favorite',
+    模式: 'i-carbon-flow',
+    背景: 'i-carbon-document',
   }
   return icons[category] || 'i-carbon-document'
 }
@@ -216,10 +219,10 @@ function getCategoryIcon(category: string): string {
 /** 获取分类背景色类 */
 function getCategoryBgClass(category: string): string {
   const classes: Record<string, string> = {
-    '规范': 'category-bg--rule',
-    '偏好': 'category-bg--preference',
-    '模式': 'category-bg--pattern',
-    '背景': 'category-bg--context',
+    规范: 'category-bg--rule',
+    偏好: 'category-bg--preference',
+    模式: 'category-bg--pattern',
+    背景: 'category-bg--context',
   }
   return classes[category] || 'category-bg--default'
 }
@@ -227,10 +230,10 @@ function getCategoryBgClass(category: string): string {
 /** 获取分类颜色 */
 function getCategoryColor(category: string): string {
   const colors: Record<string, string> = {
-    '规范': 'text-blue-500',
-    '偏好': 'text-purple-500',
-    '模式': 'text-green-500',
-    '背景': 'text-orange-500',
+    规范: 'text-blue-500',
+    偏好: 'text-purple-500',
+    模式: 'text-green-500',
+    背景: 'text-orange-500',
   }
   return colors[category] || 'text-gray-500'
 }
@@ -239,7 +242,8 @@ function getCategoryColor(category: string): string {
 function formatDate(isoString: string): string {
   try {
     return new Date(isoString).toLocaleString('zh-CN')
-  } catch {
+  }
+  catch {
     return isoString
   }
 }
@@ -389,8 +393,12 @@ defineExpose({
       <div class="empty-state-icon">
         <div class="i-carbon-document" aria-hidden="true" />
       </div>
-      <div class="empty-state-title">暂无记忆条目</div>
-      <div class="empty-state-desc">通过 AI 对话自动积累项目知识</div>
+      <div class="empty-state-title">
+        暂无记忆条目
+      </div>
+      <div class="empty-state-desc">
+        通过 AI 对话自动积累项目知识
+      </div>
     </div>
 
     <!-- 筛选后为空 -->
@@ -398,8 +406,12 @@ defineExpose({
       <div class="empty-state-icon empty-state-icon--filter">
         <div class="i-carbon-filter" aria-hidden="true" />
       </div>
-      <div class="empty-state-title">未找到匹配的记忆</div>
-      <div class="empty-state-desc">尝试调整搜索条件或标签筛选</div>
+      <div class="empty-state-title">
+        未找到匹配的记忆
+      </div>
+      <div class="empty-state-desc">
+        尝试调整搜索条件或标签筛选
+      </div>
     </div>
 
     <!-- 记忆卡片列表 -->

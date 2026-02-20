@@ -51,7 +51,8 @@ const tooltipContent = computed(() => {
   if (props.vitality.lastAccessed) {
     try {
       lines.push(`最后访问: ${new Date(props.vitality.lastAccessed).toLocaleString('zh-CN')}`)
-    } catch {
+    }
+    catch {
       // 忽略日期解析错误
     }
   }
@@ -87,7 +88,8 @@ const trendSvgPath = computed(() => {
 })
 
 const trendLineColor = computed(() => {
-  if (!props.vitality.trend) return '#9ca3af'
+  if (!props.vitality.trend)
+    return '#9ca3af'
   return getColor(props.vitality.score)
 })
 </script>
@@ -132,9 +134,13 @@ const trendLineColor = computed(() => {
         <div class="tooltip-score" :style="{ color }">
           {{ formattedScore }}
         </div>
-        <div class="tooltip-desc">{{ description }}</div>
+        <div class="tooltip-desc">
+          {{ description }}
+        </div>
       </div>
-      <div class="tooltip-details">{{ tooltipContent }}</div>
+      <div class="tooltip-details">
+        {{ tooltipContent }}
+      </div>
       <!-- 迷你趋势图 -->
       <div v-if="showTrend && vitality.trend && vitality.trend.length >= 2" class="trend-chart">
         <svg

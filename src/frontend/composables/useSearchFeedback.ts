@@ -3,13 +3,13 @@
 
 import { computed, ref, watch } from 'vue'
 
-export type SearchPhase =
-  | 'idle'
-  | 'indexing'
-  | 'searching'
-  | 'ranking'
-  | 'completed'
-  | 'error'
+export type SearchPhase
+  = | 'idle'
+    | 'indexing'
+    | 'searching'
+    | 'ranking'
+    | 'completed'
+    | 'error'
 
 export interface SearchFeedbackOptions {
   /** 自动重置延迟（毫秒），0 表示不自动重置 */

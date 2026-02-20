@@ -219,5 +219,3 @@ B) 文件缺失（兼容模式）
 ## 运行时安全网
 
 Layer 3 保障：`hooks/ccg-dual-model-validator.cjs` 在 Write 工具写入研究产出目录时验证 SESSION_ID 存在性。即使代理绕过了本模板的提示词约束，hook 也会拦截缺少 SESSION_ID 的报告写入。
-
-

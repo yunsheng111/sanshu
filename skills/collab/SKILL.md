@@ -307,5 +307,3 @@ OUTPUT: structured-analysis' | {{CCG_BIN}} --backend gemini {{GEMINI_MODEL_FLAG}
 2. **SESSION_ID 必须提取**：用于后续会话复用
 3. **超时不等于失败**：区分"等待超时"和"任务失败"
 4. **降级时通知用户**：通过 zhi 说明降级原因
-
-

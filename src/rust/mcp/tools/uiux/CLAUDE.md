@@ -69,7 +69,7 @@ pub struct SkillRunRequest {
 ```toml
 rust-embed = "8.0"
 csv = "1.3"
-serde = { version = "1.0", features = ["derive"] }
+serde = { version = "1.0", features = [ "derive" ] }
 serde_json = "1.0"
 regex = "1.0"
 ```

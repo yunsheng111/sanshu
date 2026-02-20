@@ -12,8 +12,8 @@ import { invoke } from '@tauri-apps/api/core'
 import { useMessage } from 'naive-ui'
 import { computed, onMounted, ref, watch } from 'vue'
 import ConfigSection from '../common/ConfigSection.vue'
-import MemorySearch from './MemorySearch.vue'
 import MemoryList from './MemoryList.vue'
+import MemorySearch from './MemorySearch.vue'
 
 // Props
 const props = defineProps<{
@@ -126,10 +126,10 @@ const deleteLoading = ref(false)
 // ============ 计算属性 ============
 const groupedMemories = computed(() => {
   const groups: Record<string, MemoryEntry[]> = {
-    '规范': [],
-    '偏好': [],
-    '模式': [],
-    '背景': [],
+    规范: [],
+    偏好: [],
+    模式: [],
+    背景: [],
   }
   for (const m of memories.value) {
     if (groups[m.category]) {
@@ -148,7 +148,8 @@ const thresholdPercent = computed({
 
 // ============ 加载函数 ============
 async function loadConfig() {
-  if (!projectPath.value) return
+  if (!projectPath.value)
+    return
   configLoading.value = true
   try {
     const res = await invoke<MemoryConfig>('get_memory_config', { projectPath: projectPath.value })
@@ -163,7 +164,8 @@ async function loadConfig() {
 }
 
 async function loadMemories() {
-  if (!projectPath.value) return
+  if (!projectPath.value)
+    return
   listLoading.value = true
   try {
     const [memoryList, memoryStats] = await Promise.all([
@@ -183,7 +185,8 @@ async function loadMemories() {
 
 // ============ 操作函数 ============
 async function saveConfig() {
-  if (!projectPath.value) return
+  if (!projectPath.value)
+    return
   configSaving.value = true
   try {
     await invoke('save_memory_config', {
@@ -201,7 +204,8 @@ async function saveConfig() {
 }
 
 async function executeDeduplicate() {
-  if (!projectPath.value) return
+  if (!projectPath.value)
+    return
   dedupLoading.value = true
   try {
     const result = await invoke<DedupResult>('deduplicate_memories', { projectPath: projectPath.value })
@@ -244,7 +248,8 @@ async function previewSimilarity() {
 }
 
 async function deleteMemory(id: string) {
-  if (!projectPath.value) return
+  if (!projectPath.value)
+    return
   deleteLoading.value = true
   try {
     await invoke('delete_memory', { projectPath: projectPath.value, memoryId: id })
@@ -262,7 +267,8 @@ async function deleteMemory(id: string) {
 
 // ============ 导出功能 ============
 async function exportMemories() {
-  if (!projectPath.value) return
+  if (!projectPath.value)
+    return
   exportLoading.value = true
   try {
     const data = await invoke<ExportMemories>('export_memories', {
@@ -357,20 +363,20 @@ function formatDate(isoString: string): string {
 
 function getCategoryIcon(category: string): string {
   const icons: Record<string, string> = {
-    '规范': 'i-carbon-rule',
-    '偏好': 'i-carbon-user-favorite',
-    '模式': 'i-carbon-flow',
-    '背景': 'i-carbon-document',
+    规范: 'i-carbon-rule',
+    偏好: 'i-carbon-user-favorite',
+    模式: 'i-carbon-flow',
+    背景: 'i-carbon-document',
   }
   return icons[category] || 'i-carbon-document'
 }
 
 function getCategoryBgClass(category: string): string {
   const classes: Record<string, string> = {
-    '规范': 'category-badge--rule',
-    '偏好': 'category-badge--preference',
-    '模式': 'category-badge--pattern',
-    '背景': 'category-badge--context',
+    规范: 'category-badge--rule',
+    偏好: 'category-badge--preference',
+    模式: 'category-badge--pattern',
+    背景: 'category-badge--context',
   }
   return classes[category] || ''
 }
@@ -400,8 +406,12 @@ onMounted(async () => {
       <div class="empty-icon-container">
         <div class="i-carbon-folder-off" aria-hidden="true" />
       </div>
-      <div class="empty-text">未指定项目路径</div>
-      <div class="empty-hint">请先在 MCP 工具中指定项目路径</div>
+      <div class="empty-text">
+        未指定项目路径
+      </div>
+      <div class="empty-hint">
+        请先在 MCP 工具中指定项目路径
+      </div>
     </div>
 
     <template v-else>
@@ -435,15 +445,23 @@ onMounted(async () => {
                   <div class="switch-group">
                     <div class="switch-item">
                       <div class="switch-info">
-                        <div class="switch-label">启动时自动去重</div>
-                        <div class="switch-desc">每次加载记忆时自动检测并移除重复内容</div>
+                        <div class="switch-label">
+                          启动时自动去重
+                        </div>
+                        <div class="switch-desc">
+                          每次加载记忆时自动检测并移除重复内容
+                        </div>
                       </div>
                       <n-switch v-model:value="config.dedup_on_startup" />
                     </div>
                     <div class="switch-item">
                       <div class="switch-info">
-                        <div class="switch-label">启用去重检测</div>
-                        <div class="switch-desc">添加新记忆时检测是否与现有内容重复</div>
+                        <div class="switch-label">
+                          启用去重检测
+                        </div>
+                        <div class="switch-desc">
+                          添加新记忆时检测是否与现有内容重复
+                        </div>
                       </div>
                       <n-switch v-model:value="config.enable_dedup" />
                     </div>
@@ -481,36 +499,56 @@ onMounted(async () => {
                   <div class="stat-card stat-card--total">
                     <div class="stat-accent" />
                     <div class="stat-body">
-                      <div class="stat-value stat-value--total">{{ stats.total }}</div>
-                      <div class="stat-label">总计</div>
+                      <div class="stat-value stat-value--total">
+                        {{ stats.total }}
+                      </div>
+                      <div class="stat-label">
+                        总计
+                      </div>
                     </div>
                   </div>
                   <div class="stat-card stat-card--rule">
                     <div class="stat-accent stat-accent--rule" />
                     <div class="stat-body">
-                      <div class="stat-value stat-value--rule">{{ stats.rules }}</div>
-                      <div class="stat-label">规范</div>
+                      <div class="stat-value stat-value--rule">
+                        {{ stats.rules }}
+                      </div>
+                      <div class="stat-label">
+                        规范
+                      </div>
                     </div>
                   </div>
                   <div class="stat-card stat-card--preference">
                     <div class="stat-accent stat-accent--preference" />
                     <div class="stat-body">
-                      <div class="stat-value stat-value--preference">{{ stats.preferences }}</div>
-                      <div class="stat-label">偏好</div>
+                      <div class="stat-value stat-value--preference">
+                        {{ stats.preferences }}
+                      </div>
+                      <div class="stat-label">
+                        偏好
+                      </div>
                     </div>
                   </div>
                   <div class="stat-card stat-card--pattern">
                     <div class="stat-accent stat-accent--pattern" />
                     <div class="stat-body">
-                      <div class="stat-value stat-value--pattern">{{ stats.patterns }}</div>
-                      <div class="stat-label">模式</div>
+                      <div class="stat-value stat-value--pattern">
+                        {{ stats.patterns }}
+                      </div>
+                      <div class="stat-label">
+                        模式
+                      </div>
                     </div>
                   </div>
                   <div class="stat-card stat-card--context">
                     <div class="stat-accent stat-accent--context" />
                     <div class="stat-body">
-                      <div class="stat-value stat-value--context">{{ stats.contexts }}</div>
-                      <div class="stat-label">背景</div>
+                      <div class="stat-value stat-value--context">
+                        {{ stats.contexts }}
+                      </div>
+                      <div class="stat-label">
+                        背景
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -538,108 +576,110 @@ onMounted(async () => {
 
         <!-- 记忆列表 Tab -->
         <n-tab-pane name="list" tab="记忆列表">
-            <MemoryList
-              ref="memoryListRef"
-              :project-root-path="projectPath"
-              :active="currentTab === 'list'"
-              @refresh="loadMemories"
-              @stats-updated="handleStatsUpdate"
-            />
+          <MemoryList
+            ref="memoryListRef"
+            :project-root-path="projectPath"
+            :active="currentTab === 'list'"
+            @refresh="loadMemories"
+            @stats-updated="handleStatsUpdate"
+          />
         </n-tab-pane>
 
         <!-- 搜索 Tab -->
         <n-tab-pane name="search" tab="搜索">
-            <div class="tab-content">
-              <MemorySearch
-                ref="memorySearchRef"
-                :project-root-path="projectPath"
-                @edit="handleEdit"
-                @delete="handleSearchDelete"
-              />
-            </div>
+          <div class="tab-content">
+            <MemorySearch
+              ref="memorySearchRef"
+              :project-root-path="projectPath"
+              @edit="handleEdit"
+              @delete="handleSearchDelete"
+            />
+          </div>
         </n-tab-pane>
 
         <!-- 相似度预览 Tab -->
         <n-tab-pane name="preview" tab="相似度预览">
-            <div class="tab-content">
-              <div class="preview-sections">
-                <ConfigSection title="输入检测" description="输入内容检测与现有记忆的相似度">
-                  <div class="preview-input-group">
-                    <n-input
-                      v-model:value="previewContent"
-                      type="textarea"
-                      :rows="3"
-                      placeholder="输入要检测的内容..."
-                      aria-label="待检测内容输入框"
-                      class="preview-textarea"
-                    />
-                    <n-button
-                      type="primary"
-                      :loading="previewLoading"
-                      :disabled="!previewContent.trim()"
-                      aria-describedby="similarity-result"
-                      @click="previewSimilarity"
-                    >
-                      <template #icon>
-                        <div class="i-carbon-search" aria-hidden="true" />
-                      </template>
-                      检测相似度
-                    </n-button>
-                  </div>
-                </ConfigSection>
+          <div class="tab-content">
+            <div class="preview-sections">
+              <ConfigSection title="输入检测" description="输入内容检测与现有记忆的相似度">
+                <div class="preview-input-group">
+                  <n-input
+                    v-model:value="previewContent"
+                    type="textarea"
+                    :rows="3"
+                    placeholder="输入要检测的内容..."
+                    aria-label="待检测内容输入框"
+                    class="preview-textarea"
+                  />
+                  <n-button
+                    type="primary"
+                    :loading="previewLoading"
+                    :disabled="!previewContent.trim()"
+                    aria-describedby="similarity-result"
+                    @click="previewSimilarity"
+                  >
+                    <template #icon>
+                      <div class="i-carbon-search" aria-hidden="true" />
+                    </template>
+                    检测相似度
+                  </n-button>
+                </div>
+              </ConfigSection>
 
-                <!-- 检测结果 -->
-                <n-collapse-transition :show="previewResult !== null">
-                  <ConfigSection v-if="previewResult" title="检测结果" :no-card="true">
-                    <div class="preview-result">
-                      <!-- 相似度指示器 -->
-                      <div class="similarity-indicator">
-                        <div class="similarity-track">
-                          <div
-                            class="similarity-bar"
-                            :class="{
-                              'similarity-bar--duplicate': previewResult.is_duplicate,
-                              'similarity-bar--safe': !previewResult.is_duplicate,
-                            }"
-                            :style="{ width: `${previewResult.similarity * 100}%` }"
-                          />
-                        </div>
-                        <div class="similarity-info">
-                          <span class="similarity-score" :class="{ 'similarity-score--duplicate': previewResult.is_duplicate }">
-                            {{ (previewResult.similarity * 100).toFixed(1) }}%
-                          </span>
-                          <span class="similarity-threshold">
-                            阈值 {{ (previewResult.threshold * 100).toFixed(0) }}%
-                          </span>
-                        </div>
+              <!-- 检测结果 -->
+              <n-collapse-transition :show="previewResult !== null">
+                <ConfigSection v-if="previewResult" title="检测结果" :no-card="true">
+                  <div class="preview-result">
+                    <!-- 相似度指示器 -->
+                    <div class="similarity-indicator">
+                      <div class="similarity-track">
+                        <div
+                          class="similarity-bar"
+                          :class="{
+                            'similarity-bar--duplicate': previewResult.is_duplicate,
+                            'similarity-bar--safe': !previewResult.is_duplicate,
+                          }"
+                          :style="{ width: `${previewResult.similarity * 100}%` }"
+                        />
                       </div>
-
-                      <!-- 结果状态 -->
-                      <div class="similarity-status" :class="{ 'similarity-status--duplicate': previewResult.is_duplicate }">
-                        <div class="similarity-status-icon">
-                          <div :class="previewResult.is_duplicate ? 'i-carbon-warning' : 'i-carbon-checkmark'" aria-hidden="true" />
-                        </div>
-                        <span class="similarity-status-text">
-                          {{ previewResult.is_duplicate ? '检测到相似内容，添加时将被拒绝' : '未检测到相似内容，可以添加' }}
+                      <div class="similarity-info">
+                        <span class="similarity-score" :class="{ 'similarity-score--duplicate': previewResult.is_duplicate }">
+                          {{ (previewResult.similarity * 100).toFixed(1) }}%
+                        </span>
+                        <span class="similarity-threshold">
+                          阈值 {{ (previewResult.threshold * 100).toFixed(0) }}%
                         </span>
                       </div>
+                    </div>
 
-                      <!-- 匹配的内容 -->
-                      <div v-if="previewResult.matched_content" class="matched-content">
-                        <div class="matched-accent" />
-                        <div class="matched-body">
-                          <div class="matched-label">
-                            <div class="i-carbon-link" aria-hidden="true" />
-                            最相似的记忆
-                          </div>
-                          <div class="matched-text">{{ previewResult.matched_content }}</div>
+                    <!-- 结果状态 -->
+                    <div class="similarity-status" :class="{ 'similarity-status--duplicate': previewResult.is_duplicate }">
+                      <div class="similarity-status-icon">
+                        <div :class="previewResult.is_duplicate ? 'i-carbon-warning' : 'i-carbon-checkmark'" aria-hidden="true" />
+                      </div>
+                      <span class="similarity-status-text">
+                        {{ previewResult.is_duplicate ? '检测到相似内容，添加时将被拒绝' : '未检测到相似内容，可以添加' }}
+                      </span>
+                    </div>
+
+                    <!-- 匹配的内容 -->
+                    <div v-if="previewResult.matched_content" class="matched-content">
+                      <div class="matched-accent" />
+                      <div class="matched-body">
+                        <div class="matched-label">
+                          <div class="i-carbon-link" aria-hidden="true" />
+                          最相似的记忆
+                        </div>
+                        <div class="matched-text">
+                          {{ previewResult.matched_content }}
                         </div>
                       </div>
                     </div>
-                  </ConfigSection>
-                </n-collapse-transition>
-              </div>
+                  </div>
+                </ConfigSection>
+              </n-collapse-transition>
             </div>
+          </div>
         </n-tab-pane>
       </n-tabs>
     </template>
@@ -654,7 +694,7 @@ onMounted(async () => {
     >
       <div class="edit-modal-content">
         <div v-if="editingMemory" class="edit-info">
-          <span :class="['category-badge', getCategoryBgClass(editingMemory.category)]">
+          <span class="category-badge" :class="[getCategoryBgClass(editingMemory.category)]">
             <div :class="getCategoryIcon(editingMemory.category)" aria-hidden="true" />
             {{ editingMemory.category }}
           </span>
@@ -673,7 +713,7 @@ onMounted(async () => {
 
       <template #footer>
         <div class="edit-footer">
-          <n-button @click="closeEditModal" :disabled="editSaving">
+          <n-button :disabled="editSaving" @click="closeEditModal">
             取消
           </n-button>
           <n-button type="primary" :loading="editSaving" @click="saveEdit">

@@ -63,8 +63,8 @@
 3. 每个 Builder 的 spawn 参数：
    ```javascript
    Task({
-     subagent_type: "general-purpose",
-     team_name: "fts5-integration",
+     subagent_type: 'general-purpose',
+     team_name: 'fts5-integration',
      name: `builder-T${task_id}`,
      prompt: `
        你是 Builder teammate，负责实施任务 T${task_id}。
@@ -77,7 +77,7 @@
        ${task.output_files.map(f => `- ${f.action}: ${f.path}`).join('\n')}
 
        **实施指令**：
-       ${task.instructions.map((step, i) => `${i+1}. ${step}`).join('\n')}
+       ${task.instructions.map((step, i) => `${i + 1}. ${step}`).join('\n')}
 
        **验收标准**：${task.acceptance_criteria}
 
@@ -87,7 +87,7 @@
        3. 遇到阻塞时立即报告，不要等待
        4. 所有代码必须通过编译和 lint 检查
      `,
-     mode: "default"
+     mode: 'default'
    })
    ```
 4. 维护状态表：

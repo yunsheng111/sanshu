@@ -46,7 +46,7 @@ export function useSafeInvoke() {
   async function safeInvoke<T>(
     command: string,
     args?: Record<string, unknown>,
-    options?: SafeInvokeOptions
+    options?: SafeInvokeOptions,
   ): Promise<T | null> {
     const timeout = options?.timeout ?? 30000 // 默认 30 秒
     const silent = options?.silent ?? false
@@ -60,12 +60,13 @@ export function useSafeInvoke() {
         new Promise<never>((_, reject) =>
           setTimeout(
             () => reject(new Error(`IPC 调用超时 (${timeout}ms): ${command}`)),
-            timeout
-          )
+            timeout,
+          ),
         ),
       ])
       return result
-    } catch (e) {
+    }
+    catch (e) {
       const errorMessage = e instanceof Error ? e.message : String(e)
       error.value = errorMessage
 
@@ -74,7 +75,8 @@ export function useSafeInvoke() {
       }
 
       return null
-    } finally {
+    }
+    finally {
       loading.value = false
     }
   }

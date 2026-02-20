@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, expect, it } from 'vitest'
 
 /**
  * SouConfig.vue - EMBEDDING_PROTOCOL 显示逻辑测试
@@ -9,9 +9,9 @@ import { describe, it, expect } from 'vitest'
  * - Cohere 原生格式显示 warning 类型
  */
 
-describe('SouConfig - EMBEDDING_PROTOCOL', () => {
+describe('souConfig - EMBEDDING_PROTOCOL', () => {
   // 测试数据：与 SouConfig.vue 中的 EMBEDDING_PROTOCOL 保持一致
-  const EMBEDDING_PROTOCOL: Record<string, { type: 'info' | 'success' | 'warning'; desc: string }> = {
+  const EMBEDDING_PROTOCOL: Record<string, { type: 'info' | 'success' | 'warning', desc: string }> = {
     jina: { type: 'info', desc: 'Jina AI 兼容 OpenAI Embeddings 格式（/embeddings）' },
     siliconflow: { type: 'info', desc: 'SiliconFlow 兼容 OpenAI Embeddings 格式，支持 BGE 等多种模型' },
     ollama: { type: 'success', desc: 'Ollama 本地嵌入，无需 API Key，数据不出本机' },
@@ -24,7 +24,7 @@ describe('SouConfig - EMBEDDING_PROTOCOL', () => {
     it('should have info type for OpenAI Embeddings compatible providers', () => {
       const compatProviders = ['jina', 'siliconflow', 'cloudflare', 'nomic']
 
-      compatProviders.forEach(provider => {
+      compatProviders.forEach((provider) => {
         const protocol = EMBEDDING_PROTOCOL[provider]
         expect(protocol).toBeDefined()
         expect(protocol.type).toBe('info')
@@ -33,7 +33,7 @@ describe('SouConfig - EMBEDDING_PROTOCOL', () => {
     })
 
     it('should have success type for Ollama local embedding', () => {
-      const ollamaProtocol = EMBEDDING_PROTOCOL['ollama']
+      const ollamaProtocol = EMBEDDING_PROTOCOL.ollama
       expect(ollamaProtocol).toBeDefined()
       expect(ollamaProtocol.type).toBe('success')
       expect(ollamaProtocol.desc).toContain('本地嵌入')
@@ -42,7 +42,7 @@ describe('SouConfig - EMBEDDING_PROTOCOL', () => {
     })
 
     it('should have warning type for Cohere native format', () => {
-      const cohereProtocol = EMBEDDING_PROTOCOL['cohere']
+      const cohereProtocol = EMBEDDING_PROTOCOL.cohere
       expect(cohereProtocol).toBeDefined()
       expect(cohereProtocol.type).toBe('warning')
       expect(cohereProtocol.desc).toContain('原生格式')
@@ -50,7 +50,7 @@ describe('SouConfig - EMBEDDING_PROTOCOL', () => {
     })
 
     it('should display SiliconFlow BGE model support', () => {
-      const siliconflowProtocol = EMBEDDING_PROTOCOL['siliconflow']
+      const siliconflowProtocol = EMBEDDING_PROTOCOL.siliconflow
       expect(siliconflowProtocol.desc).toContain('BGE')
       expect(siliconflowProtocol.desc).toContain('多种模型')
     })
@@ -58,7 +58,7 @@ describe('SouConfig - EMBEDDING_PROTOCOL', () => {
 
   describe('边界条件测试', () => {
     it('should return undefined for unknown provider', () => {
-      const unknownProtocol = EMBEDDING_PROTOCOL['unknown_embedding']
+      const unknownProtocol = EMBEDDING_PROTOCOL.unknown_embedding
       expect(unknownProtocol).toBeUndefined()
     })
 
@@ -69,7 +69,7 @@ describe('SouConfig - EMBEDDING_PROTOCOL', () => {
 
     it('should handle case-sensitive provider names', () => {
       // EMBEDDING_PROTOCOL 使用小写 key，大写应返回 undefined
-      const uppercaseProtocol = EMBEDDING_PROTOCOL['OLLAMA']
+      const uppercaseProtocol = EMBEDDING_PROTOCOL.OLLAMA
       expect(uppercaseProtocol).toBeUndefined()
     })
   })
@@ -78,13 +78,13 @@ describe('SouConfig - EMBEDDING_PROTOCOL', () => {
     it('should have valid type values', () => {
       const validTypes = ['info', 'success', 'warning']
 
-      Object.values(EMBEDDING_PROTOCOL).forEach(protocol => {
+      Object.values(EMBEDDING_PROTOCOL).forEach((protocol) => {
         expect(validTypes).toContain(protocol.type)
       })
     })
 
     it('should have non-empty descriptions', () => {
-      Object.values(EMBEDDING_PROTOCOL).forEach(protocol => {
+      Object.values(EMBEDDING_PROTOCOL).forEach((protocol) => {
         expect(protocol.desc).toBeTruthy()
         expect(protocol.desc.length).toBeGreaterThan(0)
       })
@@ -111,7 +111,7 @@ describe('SouConfig - EMBEDDING_PROTOCOL', () => {
     it('should cover all major embedding providers', () => {
       const requiredProviders = ['jina', 'siliconflow', 'ollama', 'cloudflare', 'nomic', 'cohere']
 
-      requiredProviders.forEach(provider => {
+      requiredProviders.forEach((provider) => {
         expect(EMBEDDING_PROTOCOL[provider]).toBeDefined()
       })
     })
@@ -131,25 +131,25 @@ describe('SouConfig - EMBEDDING_PROTOCOL', () => {
 
   describe('隐私和安全标注', () => {
     it('should emphasize Ollama privacy benefits', () => {
-      const ollamaProtocol = EMBEDDING_PROTOCOL['ollama']
+      const ollamaProtocol = EMBEDDING_PROTOCOL.ollama
       expect(ollamaProtocol.desc).toContain('数据不出本机')
     })
 
     it('should warn about Cohere incompatibility', () => {
-      const cohereProtocol = EMBEDDING_PROTOCOL['cohere']
+      const cohereProtocol = EMBEDDING_PROTOCOL.cohere
       expect(cohereProtocol.type).toBe('warning')
       expect(cohereProtocol.desc).toContain('不兼容')
     })
   })
 
-  describe('API 端点标注', () => {
+  describe('aPI 端点标注', () => {
     it('should specify Jina AI endpoint format', () => {
-      const jinaProtocol = EMBEDDING_PROTOCOL['jina']
+      const jinaProtocol = EMBEDDING_PROTOCOL.jina
       expect(jinaProtocol.desc).toContain('/embeddings')
     })
 
     it('should specify Cohere endpoint format', () => {
-      const cohereProtocol = EMBEDDING_PROTOCOL['cohere']
+      const cohereProtocol = EMBEDDING_PROTOCOL.cohere
       expect(cohereProtocol.desc).toContain('/embed')
     })
   })

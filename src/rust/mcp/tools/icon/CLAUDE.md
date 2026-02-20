@@ -94,12 +94,12 @@ pub struct IconItem {
 
 ### 核心依赖
 ```toml
-reqwest = { version = "0.11", features = ["json"] }
+reqwest = { version = "0.11", features = [ "json" ] }
 once_cell = "1.19"
 base64 = "0.21"
-resvg = "0.38"      # SVG 转 PNG
-usvg = "0.38"       # SVG 解析
-tiny-skia = "0.11"  # 图像渲染
+resvg = "0.38" # SVG 转 PNG
+usvg = "0.38" # SVG 解析
+tiny-skia = "0.11" # 图像渲染
 ```
 
 ### 缓存配置

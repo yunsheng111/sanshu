@@ -84,7 +84,7 @@ tiny-skia = "0.11"
 keyring = "2.3"
 
 # DEP-05: FTS5 全文搜索索引（bundled 编译的 SQLite 自带 FTS5 支持）
-rusqlite = { version = "0.31", features = ["bundled"] }
+rusqlite = { version = "0.31", features = [ "bundled" ] }
 
 [build-dependencies]
 tauri-build = { version = "2.0", features = [] }
@@ -96,7 +96,7 @@ tempfile = "3.10"
 [features]
 default = []
 # 使用 tauri 的 custom-protocol，避免依赖 devUrl 加载前端资源
-custom-protocol = ["tauri/custom-protocol"]
+custom-protocol = [ "tauri/custom-protocol" ]
 
 # 发布版本优化配置
 [profile.release]

@@ -1,7 +1,7 @@
+import { mount } from '@vue/test-utils'
 // MemoryList.vue ARIA 属性渲染测试
 // 验证无障碍访问标记的正确性
 import { describe, expect, it, vi } from 'vitest'
-import { mount } from '@vue/test-utils'
 import { h } from 'vue'
 import MemoryList from './MemoryList.vue'
 
@@ -70,7 +70,7 @@ vi.mock('@tauri-apps/api/core', () => ({
   }),
 }))
 
-describe('MemoryList.vue ARIA 属性', () => {
+describe('memoryList.vue ARIA 属性', () => {
   // --- 根容器 ARIA ---
   it('根容器应有 role="region" 和 aria-label="记忆列表"', async () => {
     // Arrange & Act

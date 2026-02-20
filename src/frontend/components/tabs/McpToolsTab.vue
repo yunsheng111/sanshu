@@ -3,16 +3,15 @@ import { useMessage } from 'naive-ui'
 import { computed, defineAsyncComponent, onMounted, ref } from 'vue'
 import { useMcpToolsReactive } from '../../composables/useMcpTools'
 
+const props = defineProps<{
+  projectRootPath?: string | null
+}>()
 // 异步加载配置组件
 const SouConfig = defineAsyncComponent(() => import('../tools/SouConfig.vue'))
 const Context7Config = defineAsyncComponent(() => import('../tools/Context7Config.vue'))
 const IconWorkshop = defineAsyncComponent(() => import('../tools/IconWorkshop/IconWorkshop.vue'))
 const EnhanceConfig = defineAsyncComponent(() => import('../tools/EnhanceConfig.vue'))
 const MemoryManager = defineAsyncComponent(() => import('../tools/MemoryManager.vue'))
-
-const props = defineProps<{
-  projectRootPath?: string | null
-}>()
 
 // 全局 MCP 工具状态
 const {

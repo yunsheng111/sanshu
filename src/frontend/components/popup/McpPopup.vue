@@ -295,7 +295,8 @@ function buildUserReplySummary() {
 // 记录 zhi 历史（不影响主流程）
 async function recordZhiHistory() {
   const projectRoot = props.request?.project_root_path
-  if (!projectRoot) return
+  if (!projectRoot)
+    return
 
   const prompt = props.request?.message || ''
   const requestId = props.request?.id || ''
@@ -461,12 +462,12 @@ function handleEnhance() {
 function handleEnhanceConfirm(enhancedPrompt: string) {
   // 替换输入框内容
   userInput.value = enhancedPrompt
-  
+
   // 同步到 PopupInput 组件
   if (inputRef.value) {
     inputRef.value.updateData({ userInput: enhancedPrompt })
   }
-  
+
   message.success('提示词已增强')
   showEnhanceModal.value = false
 }
@@ -568,7 +569,9 @@ function handleOpenIndexStatus() {
           </div>
         </template>
         <div class="text-xs space-y-1 max-w-[280px]">
-          <div class="font-medium">UI/UX 上下文策略详情</div>
+          <div class="font-medium">
+            UI/UX 上下文策略详情
+          </div>
           <div>{{ policyStatus.reason }}</div>
           <div class="text-white/60 pt-1 border-t border-white/10">
             意图：{{ policyStatus.intent }} · 策略：{{ policyStatus.policy }}

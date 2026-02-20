@@ -82,9 +82,9 @@ pub struct ZhiRequest {
 
 ### 核心依赖
 ```toml
-rmcp = { version = "0.12.0", features = ["server"] }
+rmcp = { version = "0.12.0", features = [ "server" ] }
 anyhow = "1.0"
-serde = { version = "1.0", features = ["derive"] }
+serde = { version = "1.0", features = [ "derive" ] }
 serde_json = "1.0"
 ```
 

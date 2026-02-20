@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useMessage } from 'naive-ui'
+import { computed, onMounted, ref, watch } from 'vue'
 /**
  * 版本快照对比组件
  * 调用后端"获取快照"操作获取版本历史
@@ -7,8 +9,6 @@
  * 支持回滚到指定版本
  */
 import { useSafeInvoke } from '../../composables/useSafeInvoke'
-import { useMessage } from 'naive-ui'
-import { computed, onMounted, ref, watch } from 'vue'
 
 // Props
 const props = defineProps<{
@@ -72,21 +72,24 @@ const versionOptions = computed(() => {
 
 /** 版本 A 的内容 */
 const contentA = computed(() => {
-  if (versionA.value === null) return ''
+  if (versionA.value === null)
+    return ''
   const snap = snapshots.value.find(s => s.version === versionA.value)
   return snap?.content ?? ''
 })
 
 /** 版本 B 的内容 */
 const contentB = computed(() => {
-  if (versionB.value === null) return ''
+  if (versionB.value === null)
+    return ''
   const snap = snapshots.value.find(s => s.version === versionB.value)
   return snap?.content ?? ''
 })
 
 /** diff 结果 */
 const diffLines = computed<DiffLine[]>(() => {
-  if (!contentA.value && !contentB.value) return []
+  if (!contentA.value && !contentB.value)
+    return []
   return computeSimpleDiff(contentA.value, contentB.value)
 })
 
@@ -122,15 +125,18 @@ function computeSimpleDiff(textA: string, textB: string): DiffLine[] {
       result.push({ text: linesA[i], type: 'unchanged' })
       i++
       j++
-    } else if (j < linesB.length && (i >= linesA.length || !linesA.slice(i).includes(linesB[j]))) {
+    }
+    else if (j < linesB.length && (i >= linesA.length || !linesA.slice(i).includes(linesB[j]))) {
       // B 中新增的行
       result.push({ text: linesB[j], type: 'added' })
       j++
-    } else if (i < linesA.length && (j >= linesB.length || !linesB.slice(j).includes(linesA[i]))) {
+    }
+    else if (i < linesA.length && (j >= linesB.length || !linesB.slice(j).includes(linesA[i]))) {
       // A 中被删除的行
       result.push({ text: linesA[i], type: 'removed' })
       i++
-    } else {
+    }
+    else {
       // 两行都存在但不同 —— 标记为删除旧行 + 添加新行
       result.push({ text: linesA[i], type: 'removed' })
       result.push({ text: linesB[j], type: 'added' })
@@ -147,7 +153,8 @@ function computeSimpleDiff(textA: string, textB: string): DiffLine[] {
 function formatTime(isoString: string): string {
   try {
     return new Date(isoString).toLocaleString('zh-CN')
-  } catch {
+  }
+  catch {
     return isoString
   }
 }
@@ -168,7 +175,8 @@ function handleCloseRollback() {
 
 /** 执行回滚 */
 async function handleConfirmRollback() {
-  if (rollbackTargetVersion.value === null) return
+  if (rollbackTargetVersion.value === null)
+    return
 
   rollbackLoading.value = true
   try {
@@ -181,19 +189,23 @@ async function handleConfirmRollback() {
     if (result) {
       emit('rollback-success', props.memoryId)
       handleCloseRollback()
-    } else {
+    }
+    else {
       message.error('回滚失败，请重试')
     }
-  } catch (err) {
-    message.error('回滚失败：' + (err instanceof Error ? err.message : '未知错误'))
-  } finally {
+  }
+  catch (err) {
+    message.error(`回滚失败：${err instanceof Error ? err.message : '未知错误'}`)
+  }
+  finally {
     rollbackLoading.value = false
   }
 }
 
 /** 获取目标版本的快照信息 */
 const rollbackTargetSnapshot = computed(() => {
-  if (rollbackTargetVersion.value === null) return null
+  if (rollbackTargetVersion.value === null)
+    return null
   return snapshots.value.find(s => s.version === rollbackTargetVersion.value) ?? null
 })
 
@@ -212,7 +224,8 @@ async function loadSnapshots() {
     if (result.length >= 2) {
       versionA.value = snapshots.value[snapshots.value.length - 2].version
       versionB.value = snapshots.value[snapshots.value.length - 1].version
-    } else if (result.length === 1) {
+    }
+    else if (result.length === 1) {
       versionB.value = snapshots.value[0].version
     }
   }
@@ -370,7 +383,9 @@ onMounted(() => {
         <p v-if="rollbackTargetSnapshot" class="rollback-time">
           版本时间：{{ formatTime(rollbackTargetSnapshot.timestamp) }}
         </p>
-        <p class="rollback-warning">此操作将覆盖当前内容，但会保留版本历史。</p>
+        <p class="rollback-warning">
+          此操作将覆盖当前内容，但会保留版本历史。
+        </p>
       </div>
     </n-modal>
   </div>

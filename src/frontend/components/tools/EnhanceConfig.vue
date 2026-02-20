@@ -35,7 +35,7 @@ const historyLoading = ref(false)
 const hasProject = computed(() => !!props.projectRootPath)
 
 // 供应商默认配置
-const PROVIDER_DEFAULTS: Record<string, { base_url: string; model: string; label: string }> = {
+const PROVIDER_DEFAULTS: Record<string, { base_url: string, model: string, label: string }> = {
   ollama: { base_url: 'http://localhost:11434', model: 'qwen2.5-coder:7b', label: 'Ollama 本地' },
   openai: { base_url: 'https://api.openai.com/v1', model: 'gpt-4o-mini', label: 'OpenAI' },
   grok: { base_url: 'https://api.x.ai/v1', model: 'grok-3-mini', label: 'Grok (xAI)' },
@@ -50,7 +50,7 @@ const PROVIDER_DEFAULTS: Record<string, { base_url: string; model: string; label
 const providerOptions = Object.entries(PROVIDER_DEFAULTS).map(([value, { label }]) => ({ label, value }))
 
 // 各供应商协议类型说明
-const PROVIDER_PROTOCOL: Record<string, { type: 'info' | 'success' | 'warning'; desc: string }> = {
+const PROVIDER_PROTOCOL: Record<string, { type: 'info' | 'success' | 'warning', desc: string }> = {
   openai: { type: 'info', desc: 'OpenAI 原生格式（/chat/completions）' },
   grok: { type: 'info', desc: 'Grok (xAI) 兼容 OpenAI 格式，可直接使用 OpenAI SDK' },
   deepseek: { type: 'info', desc: 'DeepSeek 兼容 OpenAI 格式（/chat/completions）' },
@@ -204,7 +204,6 @@ onMounted(() => {
   <div class="enhance-config">
     <n-scrollbar class="config-scrollbar">
       <n-space vertical size="large" class="config-content">
-
         <!-- 供应商选择 -->
         <ConfigSection title="供应商选择" description="选择提示词增强使用的 AI 服务">
           <n-select

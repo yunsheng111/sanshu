@@ -69,11 +69,15 @@ async fn download_and_install_update(app: AppHandle) -> Result<(), String>
 
 ### 核心依赖
 ```toml
-tauri = { version = "2.0", features = ["tray-icon", "image-ico", "image-png"] }
+tauri = { version = "2.0", features = [
+  "tray-icon",
+  "image-ico",
+  "image-png"
+] }
 tauri-plugin-updater = "2.0"
 rodio = "0.19"
 rust-embed = "8.0"
-reqwest = { version = "0.11", features = ["stream"] }
+reqwest = { version = "0.11", features = [ "stream" ] }
 ```
 
 ---

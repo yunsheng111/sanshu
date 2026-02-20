@@ -379,12 +379,12 @@ graph TD
 ```typescript
 // src/frontend/utils/snippetParser.ts (SC-18 参考实现)
 export function parseFts5Snippet(snippet: string) {
-  const regex = /<mark>(.*?)<\/mark>/g;
-  const parts = snippet.split(regex);
+  const regex = /<mark>(.*?)<\/mark>/g
+  const parts = snippet.split(regex)
   return parts.map((text, index) => ({
-    text: text, // 此处文本需在渲染时转义
+    text, // 此处文本需在渲染时转义
     isMatch: index % 2 === 1
-  }));
+  }))
 }
 ```
 

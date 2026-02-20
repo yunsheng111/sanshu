@@ -1841,7 +1841,10 @@ pub mod vitality;     // P1 新增
 在 `[dependencies]` 区域新增：
 
 ```toml
-rusqlite = { version = "0.31", features = ["bundled", "fts5"] }
+rusqlite = { version = "0.31", features = [
+  "bundled",
+  "fts5"
+] }
 ```
 
 `bundled` 特性确保自带 SQLite，`fts5` 启用 FTS5 全文搜索。

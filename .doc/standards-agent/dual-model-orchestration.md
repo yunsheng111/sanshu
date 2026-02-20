@@ -73,13 +73,15 @@ INIT → RUNNING → SUCCESS
 ```javascript
 // 伪代码示例
 if (codexSuccess && geminiSuccess) {
-  state = 'SUCCESS';
-} else if (codexSuccess || geminiSuccess) {
-  state = 'DEGRADED';
-  logWarning('单模型降级运行');
-} else {
-  state = 'FAILED';
-  throw new Error('双模型均失败');
+  state = 'SUCCESS'
+}
+else if (codexSuccess || geminiSuccess) {
+  state = 'DEGRADED'
+  logWarning('单模型降级运行')
+}
+else {
+  state = 'FAILED'
+  throw new Error('双模型均失败')
 }
 ```
 
@@ -91,12 +93,12 @@ if (codexSuccess && geminiSuccess) {
 
 ```javascript
 // SESSION_ID 格式：UUID v4（带连字符）
-const SESSION_ID_PATTERN = /SESSION_ID:\s*([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})/i;
+const SESSION_ID_PATTERN = /SESSION_ID:\s*([a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12})/i
 
 // 提取函数
 function extractSessionId(output) {
-  const match = output.match(SESSION_ID_PATTERN);
-  return match ? match[1] : null;
+  const match = output.match(SESSION_ID_PATTERN)
+  return match ? match[1] : null
 }
 ```
 
@@ -109,24 +111,24 @@ gemini_output=$(echo '<TASK>分析目标</TASK>' | {{CCG_BIN}} --backend gemini 
 ```
 
 ```javascript
-const sessionPattern = /SESSION_ID:\s*([a-f0-9-]{36})/i;
-const codex_session = (codex_output.match(sessionPattern) || [])[1] || null;
-const gemini_session = (gemini_output.match(sessionPattern) || [])[1] || null;
+const sessionPattern = /SESSION_ID:\s*([a-f0-9-]{36})/i
+const codex_session = (codex_output.match(sessionPattern) || [])[1] || null
+const gemini_session = (gemini_output.match(sessionPattern) || [])[1] || null
 ```
 
 ### 错误处理
 
 ```javascript
 if (!codexSession && !geminiSession) {
-  throw new Error('双模型均未返回 SESSION_ID');
+  throw new Error('双模型均未返回 SESSION_ID')
 }
 
 if (!codexSession) {
-  logWarning('Codex 未返回 SESSION_ID，使用 Gemini 结果');
+  logWarning('Codex 未返回 SESSION_ID，使用 Gemini 结果')
 }
 
 if (!geminiSession) {
-  logWarning('Gemini 未返回 SESSION_ID，使用 Codex 结果');
+  logWarning('Gemini 未返回 SESSION_ID，使用 Codex 结果')
 }
 ```
 
@@ -141,26 +143,28 @@ if (!geminiSession) {
 ```javascript
 // 执行门禁（OR 逻辑）— 唯一真源定义
 const passGate = (
-  liteMode ||                          // Lite 模式豁免
-  codexSession ||                      // Codex 返回有效 SESSION_ID
-  geminiSession                        // Gemini 返回有效 SESSION_ID
-);
+  liteMode // Lite 模式豁免
+  || codexSession // Codex 返回有效 SESSION_ID
+  || geminiSession // Gemini 返回有效 SESSION_ID
+)
 
 if (!passGate) {
   // 双模型均无 SESSION_ID => FAILED（不是 DEGRADED）
-  throw new Error('门禁失败：双模型均未返回有效 SESSION_ID');
+  throw new Error('门禁失败：双模型均未返回有效 SESSION_ID')
 }
 
 // 质量门禁（代理层判断）
 if (codexSession && geminiSession) {
-  status = 'SUCCESS';
-} else if (codexSession || geminiSession) {
-  status = 'DEGRADED';
-  degraded_level = determineDegradedLevel(role, missingModel);
-  missing_dimensions = missingModel === 'codex' ? ['backend'] : ['frontend'];
+  status = 'SUCCESS'
+}
+else if (codexSession || geminiSession) {
+  status = 'DEGRADED'
+  degraded_level = determineDegradedLevel(role, missingModel)
+  missing_dimensions = missingModel === 'codex' ? ['backend'] : ['frontend']
   // DEGRADED 产出前置动作：标注缺失维度 + 风险影响 + 补偿分析，经 zhi 确认
-} else {
-  status = 'FAILED';
+}
+else {
+  status = 'FAILED'
 }
 ```
 
@@ -212,29 +216,29 @@ fi
 **原则**：超时不等于失败，继续轮询，不重启任务。
 
 ```javascript
-const MAX_RETRIES = 3;
-const POLL_INTERVAL = 5000; // 5 秒
+const MAX_RETRIES = 3
+const POLL_INTERVAL = 5000 // 5 秒
 
 async function pollWithRetry(checkFn, maxRetries = MAX_RETRIES) {
   for (let i = 0; i < maxRetries; i++) {
-    const result = await checkFn();
+    const result = await checkFn()
 
     if (result.success) {
-      return result;
+      return result
     }
 
     if (result.timeout) {
-      logWarning(`轮询超时 (${i + 1}/${maxRetries})，继续等待...`);
-      await sleep(POLL_INTERVAL);
-      continue;
+      logWarning(`轮询超时 (${i + 1}/${maxRetries})，继续等待...`)
+      await sleep(POLL_INTERVAL)
+      continue
     }
 
     if (result.failed) {
-      throw new Error('任务失败');
+      throw new Error('任务失败')
     }
   }
 
-  throw new Error('超过最大重试次数');
+  throw new Error('超过最大重试次数')
 }
 ```
 
@@ -357,6 +361,3 @@ fi
 - [CCG 架构文档](../framework/ccg/ARCHITECTURE.md)
 - [命令规范模板](./command-template.md)
 - [代理规范模板](./agent-template.md)
-
-
-

@@ -80,8 +80,8 @@ pub struct SkillRunRequest {
 
 ### 核心依赖
 ```toml
-tokio = { version = "1.0", features = ["process"] }
-serde = { version = "1.0", features = ["derive"] }
+tokio = { version = "1.0", features = [ "process" ] }
+serde = { version = "1.0", features = [ "derive" ] }
 serde_json = "1.0"
 anyhow = "1.0"
 ```

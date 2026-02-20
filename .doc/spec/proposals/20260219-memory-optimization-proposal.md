@@ -290,26 +290,26 @@ MemoryManager.vue（主容器 -- 替代 MemoryConfig.vue）
 // composables/useMemoryTree.ts
 // 将 MemoryEntry[] 转换为域树结构
 function useMemoryTree(entries: Ref<MemoryEntry[]>): {
-  treeData: ComputedRef<TreeOption[]>,
-  expandedKeys: Ref<string[]>,
-  selectedDomain: Ref<string | null>,
+  treeData: ComputedRef<TreeOption[]>
+  expandedKeys: Ref<string[]>
+  selectedDomain: Ref<string | null>
   filterByDomain: (domain: string) => MemoryEntry[]
 }
 
 // composables/useVitalityDecay.ts
 // 活力值计算和视觉化
 function useVitalityDecay(): {
-  calculateCurrentVitality: (entry: MemoryEntry) => number,
-  vitalityColor: (score: number) => string,
+  calculateCurrentVitality: (entry: MemoryEntry) => number
+  vitalityColor: (score: number) => string
   isCleanupCandidate: (entry: MemoryEntry) => boolean
 }
 
 // composables/useProgressiveDisclosure.ts
 // 渐进式披露状态管理
 function useProgressiveDisclosure(): {
-  disclosureLevel: Ref<Map<string, 'collapsed' | 'expanded' | 'detail'>>,
-  toggle: (id: string) => void,
-  expandAll: () => void,
+  disclosureLevel: Ref<Map<string, 'collapsed' | 'expanded' | 'detail'>>
+  toggle: (id: string) => void
+  expandAll: () => void
   collapseAll: () => void
 }
 ```

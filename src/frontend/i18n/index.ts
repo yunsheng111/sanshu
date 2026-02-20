@@ -1,7 +1,7 @@
 // HC-13: Vue I18n 配置
 import { createI18n } from 'vue-i18n'
-import zh from './zh'
 import en from './en'
+import zh from './zh'
 
 export type MessageSchema = typeof zh
 

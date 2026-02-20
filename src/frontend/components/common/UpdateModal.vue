@@ -70,7 +70,7 @@ let unlistenAutoExit: (() => void) | null = null
 onMounted(async () => {
   // 获取平台信息
   await getPlatformInfo()
-  
+
   // 设置自动退出监听器（仅 Windows 平台需要）
   unlistenAutoExit = await setupAutoExitListener()
 })

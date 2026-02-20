@@ -1,12 +1,12 @@
+import { invoke } from '@tauri-apps/api/core'
+import { flushPromises, mount } from '@vue/test-utils'
+import { createPinia } from 'pinia'
 /**
  * AppContent 集成测试
  * 验证 C2 修复：fallbackProjectPath 降级逻辑
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { mount, flushPromises } from '@vue/test-utils'
-import { createPinia } from 'pinia'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import AppContent from '../AppContent.vue'
-import { invoke } from '@tauri-apps/api/core'
 
 // Mock Tauri invoke
 vi.mock('@tauri-apps/api/core', () => ({
@@ -54,7 +54,7 @@ vi.mock('../../composables/useVersionCheck', () => ({
   setupAutoExitListener: vi.fn(),
 }))
 
-describe('AppContent - fallbackProjectPath 降级逻辑', () => {
+describe('appContent - fallbackProjectPath 降级逻辑', () => {
   beforeEach(() => {
     vi.clearAllMocks()
   })
@@ -91,7 +91,7 @@ describe('AppContent - fallbackProjectPath 降级逻辑', () => {
     expect(wrapper.vm.fallbackProjectPath).toBe(mockProjectPath)
   })
 
-  it('MCP 弹窗模式下不应该调用 get_current_dir', async () => {
+  it('mCP 弹窗模式下不应该调用 get_current_dir', async () => {
     const wrapper = mount(AppContent, {
       props: {
         showMcpPopup: true, // 弹窗模式

@@ -162,13 +162,27 @@ pub enum McpToolError {
 ### 核心依赖
 ```toml
 [dependencies]
-rmcp = { version = "0.12.0", features = ["server", "transport-io"] }
-tokio = { version = "1.0", features = ["rt-multi-thread", "macros", "fs", "process", "sync", "time"] }
+rmcp = { version = "0.12.0", features = [
+  "server",
+  "transport-io"
+] }
+tokio = { version = "1.0", features = [
+  "rt-multi-thread",
+  "macros",
+  "fs",
+  "process",
+  "sync",
+  "time"
+] }
 anyhow = "1.0"
 thiserror = "1.0"
-serde = { version = "1.0", features = ["derive"] }
+serde = { version = "1.0", features = [ "derive" ] }
 serde_json = "1.0"
-reqwest = { version = "0.11", features = ["stream", "json", "socks"] }
+reqwest = { version = "0.11", features = [
+  "stream",
+  "json",
+  "socks"
+] }
 once_cell = "1.0"
 ```
 

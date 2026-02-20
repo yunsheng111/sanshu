@@ -243,11 +243,11 @@ if SummaryGenerator::needs_summary(&content, &self.store.config) {
 describe('DomainTree', () => {
   it('should load domains on mount', async () => {
     // 测试域列表加载
-  });
+  })
   it('should emit select event on node click', () => {
     // 测试选择事件
-  });
-});
+  })
+})
 ```
 
 **验收标准**:

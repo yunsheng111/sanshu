@@ -75,9 +75,12 @@ const hasResults = computed(() => results.value.length > 0)
 const parsedInfo = computed(() => {
   const parsed = parseQuery(query.value)
   const parts: string[] = []
-  if (parsed.domain) parts.push(`域: ${parsed.domain}`)
-  if (parsed.tags.length > 0) parts.push(`标签: ${parsed.tags.join(', ')}`)
-  if (parsed.text) parts.push(`关键词: ${parsed.text}`)
+  if (parsed.domain)
+    parts.push(`域: ${parsed.domain}`)
+  if (parsed.tags.length > 0)
+    parts.push(`标签: ${parsed.tags.join(', ')}`)
+  if (parsed.text)
+    parts.push(`关键词: ${parsed.text}`)
   return parts.length > 0 ? parts.join(' | ') : ''
 })
 
@@ -90,7 +93,8 @@ const parsedInfo = computed(() => {
  */
 function parseQuery(input: string): ParsedQuery {
   const result: ParsedQuery = { text: '', domain: null, tags: [] }
-  if (!input.trim()) return result
+  if (!input.trim())
+    return result
 
   try {
     let remaining = input.trim()
@@ -113,7 +117,8 @@ function parseQuery(input: string): ParsedQuery {
 
     // 剩余部分为纯文本搜索关键词
     result.text = remaining
-  } catch {
+  }
+  catch {
     // 正则解析失败，降级为纯全文搜索
     result.text = input.trim()
     result.domain = null
@@ -235,10 +240,10 @@ function getRelevanceType(relevance: number): 'success' | 'warning' | 'info' {
 // 获取分类图标
 function getCategoryIcon(category: string): string {
   const icons: Record<string, string> = {
-    '规范': 'i-carbon-rule',
-    '偏好': 'i-carbon-user-favorite',
-    '模式': 'i-carbon-flow',
-    '背景': 'i-carbon-document',
+    规范: 'i-carbon-rule',
+    偏好: 'i-carbon-user-favorite',
+    模式: 'i-carbon-flow',
+    背景: 'i-carbon-document',
   }
   return icons[category] || 'i-carbon-document'
 }
@@ -246,10 +251,10 @@ function getCategoryIcon(category: string): string {
 // 获取分类色条颜色
 function getCategoryAccentColor(category: string): string {
   const colors: Record<string, string> = {
-    '规范': 'linear-gradient(180deg, #3b82f6, #60a5fa)',
-    '偏好': 'linear-gradient(180deg, #a855f7, #c084fc)',
-    '模式': 'linear-gradient(180deg, #22c55e, #4ade80)',
-    '背景': 'linear-gradient(180deg, #f97316, #fb923c)',
+    规范: 'linear-gradient(180deg, #3b82f6, #60a5fa)',
+    偏好: 'linear-gradient(180deg, #a855f7, #c084fc)',
+    模式: 'linear-gradient(180deg, #22c55e, #4ade80)',
+    背景: 'linear-gradient(180deg, #f97316, #fb923c)',
   }
   return colors[category] || 'linear-gradient(180deg, #9ca3af, #d1d5db)'
 }
@@ -257,10 +262,10 @@ function getCategoryAccentColor(category: string): string {
 // 获取分类标签背景
 function getCategoryBgClass(category: string): string {
   const classes: Record<string, string> = {
-    '规范': 'category-badge--rule',
-    '偏好': 'category-badge--preference',
-    '模式': 'category-badge--pattern',
-    '背景': 'category-badge--context',
+    规范: 'category-badge--rule',
+    偏好: 'category-badge--preference',
+    模式: 'category-badge--pattern',
+    背景: 'category-badge--context',
   }
   return classes[category] || ''
 }
@@ -322,15 +327,21 @@ defineExpose({
     <n-collapse-transition :show="!hasSearched && !query.trim()">
       <div class="syntax-hints">
         <div class="hint-item">
-          <n-tag size="tiny" type="info" :bordered="false">@域名</n-tag>
+          <n-tag size="tiny" type="info" :bordered="false">
+            @域名
+          </n-tag>
           <span>按域过滤，如 <code>@myproject</code></span>
         </div>
         <div class="hint-item">
-          <n-tag size="tiny" type="success" :bordered="false">#标签</n-tag>
+          <n-tag size="tiny" type="success" :bordered="false">
+            #标签
+          </n-tag>
           <span>按标签过滤，如 <code>#规范 #偏好</code></span>
         </div>
         <div class="hint-item">
-          <n-tag size="tiny" type="default" :bordered="false">关键词</n-tag>
+          <n-tag size="tiny" type="default" :bordered="false">
+            关键词
+          </n-tag>
           <span>全文搜索，300ms 实时响应</span>
         </div>
       </div>
@@ -349,8 +360,12 @@ defineExpose({
         <div class="empty-icon-container">
           <div class="i-carbon-search-locate" aria-hidden="true" />
         </div>
-        <div class="empty-text">未找到匹配的记忆</div>
-        <div class="empty-hint">尝试调整关键词或分类筛选</div>
+        <div class="empty-text">
+          未找到匹配的记忆
+        </div>
+        <div class="empty-hint">
+          尝试调整关键词或分类筛选
+        </div>
       </div>
 
       <!-- 结果列表 -->
@@ -382,7 +397,7 @@ defineExpose({
               <!-- 头部：分类 + 相关度 -->
               <div class="result-meta">
                 <div class="result-category">
-                  <span :class="['category-badge', getCategoryBgClass(item.category)]">
+                  <span class="category-badge" :class="[getCategoryBgClass(item.category)]">
                     <div :class="getCategoryIcon(item.category)" aria-hidden="true" />
                     {{ item.category }}
                   </span>
@@ -453,8 +468,12 @@ defineExpose({
         <div class="empty-icon-container empty-icon-container--large">
           <div class="i-carbon-search" aria-hidden="true" />
         </div>
-        <div class="empty-text">输入关键词开始搜索</div>
-        <div class="empty-hint">支持全文检索和 @域名 / #标签 精确筛选</div>
+        <div class="empty-text">
+          输入关键词开始搜索
+        </div>
+        <div class="empty-hint">
+          支持全文检索和 @域名 / #标签 精确筛选
+        </div>
       </div>
     </div>
   </div>

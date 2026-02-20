@@ -207,7 +207,10 @@
   tree-sitter-python = { version = "0.21", optional = true }
 
   [features]
-  ast-chunking = ["tree-sitter", "tree-sitter-rust", "tree-sitter-typescript", "tree-sitter-python"]
+  ast-chunking = [" tree-sitter",
+  tree-sitter-rust",
+  tree-sitter-typescript",
+  tree-sitter-python"]
   ```
 
 ### [I2] RRF 融合算法缺少 k 值配置化

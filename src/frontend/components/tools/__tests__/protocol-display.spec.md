@@ -11,7 +11,7 @@
 ### 测试数据结构
 
 ```typescript
-const PROVIDER_PROTOCOL: Record<string, { type: 'info' | 'success' | 'warning'; desc: string }> = {
+const PROVIDER_PROTOCOL: Record<string, { type: 'info' | 'success' | 'warning', desc: string }> = {
   openai: { type: 'info', desc: 'OpenAI 原生格式（/chat/completions）' },
   grok: { type: 'info', desc: 'Grok (xAI) 兼容 OpenAI 格式，可直接使用 OpenAI SDK' },
   deepseek: { type: 'info', desc: 'DeepSeek 兼容 OpenAI 格式（/chat/completions）' },
@@ -103,7 +103,7 @@ const PROVIDER_PROTOCOL: Record<string, { type: 'info' | 'success' | 'warning'; 
 ### 测试数据结构
 
 ```typescript
-const EMBEDDING_PROTOCOL: Record<string, { type: 'info' | 'success' | 'warning'; desc: string }> = {
+const EMBEDDING_PROTOCOL: Record<string, { type: 'info' | 'success' | 'warning', desc: string }> = {
   jina: { type: 'info', desc: 'Jina AI 兼容 OpenAI Embeddings 格式（/embeddings）' },
   siliconflow: { type: 'info', desc: 'SiliconFlow 兼容 OpenAI Embeddings 格式，支持 BGE 等多种模型' },
   ollama: { type: 'success', desc: 'Ollama 本地嵌入，无需 API Key，数据不出本机' },
@@ -208,10 +208,10 @@ const EMBEDDING_PROTOCOL: Record<string, { type: 'info' | 'success' | 'warning';
 
 ```typescript
 import { mount } from '@vue/test-utils'
-import { describe, it, expect } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import EnhanceConfig from '../EnhanceConfig.vue'
 
-describe('EnhanceConfig - PROVIDER_PROTOCOL', () => {
+describe('enhanceConfig - PROVIDER_PROTOCOL', () => {
   it('should display info alert for OpenAI compatible providers', () => {
     const wrapper = mount(EnhanceConfig, {
       props: { active: true },

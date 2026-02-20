@@ -1,12 +1,12 @@
 <script setup lang="ts">
+import { useMessage } from 'naive-ui'
+import { computed, onMounted, ref, type TreeOption, watch } from 'vue'
 /**
  * 域树组件
  * 使用 NTree 渲染域/路径树结构
  * 通过后端"域列表"操作获取数据，支持右键菜单
  */
 import { useSafeInvoke } from '../../composables/useSafeInvoke'
-import { useMessage } from 'naive-ui'
-import { computed, nextTick, onMounted, ref, watch, type TreeOption } from 'vue'
 
 // Props
 const props = defineProps<{
@@ -55,7 +55,7 @@ const treeData = computed<TreeOption[]>(() => {
   const allNode: TreeOption = {
     key: '__all__',
     label: `全部`,
-    prefix: () => h('div', { class: 'i-carbon-data-base domain-icon domain-icon--all', 'aria-hidden': 'true' }),
+    prefix: () => h('div', { 'class': 'i-carbon-data-base domain-icon domain-icon--all', 'aria-hidden': 'true' }),
     suffix: () => h('span', { class: 'domain-count domain-count--all' }, totalCount.value.toString()),
   }
 
@@ -111,7 +111,7 @@ function domainToTreeOption(domain: DomainInfo): TreeOption {
   const option: TreeOption = {
     key: domain.path,
     label: getShortName(domain.path),
-    prefix: () => h('div', { class: `${iconClass} ${colorClass}`, 'aria-hidden': 'true' }),
+    prefix: () => h('div', { 'class': `${iconClass} ${colorClass}`, 'aria-hidden': 'true' }),
     suffix: () => h('span', {
       class: `domain-count ${domain.count === 0 ? 'domain-count--zero' : ''}`,
     }, domain.count.toString()),
@@ -154,7 +154,8 @@ function handleSelect(keys: string[]) {
   const selectedKey = keys[0] ?? null
   if (selectedKey === '__all__') {
     emit('select', null) // null 表示全部
-  } else {
+  }
+  else {
     emit('select', selectedKey)
   }
 }
@@ -163,7 +164,8 @@ function handleSelect(keys: string[]) {
 function handleContextMenu(e: MouseEvent, option: TreeOption) {
   e.preventDefault()
   const key = option.key as string
-  if (key === '__all__') return // 不对"全部"节点显示菜单
+  if (key === '__all__')
+    return // 不对"全部"节点显示菜单
 
   contextMenuTarget.value = key
   contextMenuX.value = e.clientX
@@ -196,7 +198,8 @@ async function handleContextMenuSelect(key: string) {
         message.success('空域已删除')
         await loadDomains()
       }
-    } else {
+    }
+    else {
       message.warning('仅可删除记忆数为 0 的空域')
     }
   }
@@ -205,10 +208,12 @@ async function handleContextMenuSelect(key: string) {
 /** 递归查找域 */
 function findDomain(list: DomainInfo[], path: string): DomainInfo | null {
   for (const d of list) {
-    if (d.path === path) return d
+    if (d.path === path)
+      return d
     if (d.children) {
       const found = findDomain(d.children, path)
-      if (found) return found
+      if (found)
+        return found
     }
   }
   return null
@@ -263,7 +268,7 @@ defineExpose({
 
     <!-- 加载状态 -->
     <div v-if="loading && domains.length === 0" class="loading-state">
-      <div class="skeleton-item" v-for="i in 4" :key="i">
+      <div v-for="i in 4" :key="i" class="skeleton-item">
         <n-skeleton text style="width: 70%" />
       </div>
     </div>
@@ -273,8 +278,12 @@ defineExpose({
       <div class="empty-illustration">
         <div class="i-carbon-tree-view" aria-hidden="true" />
       </div>
-      <div class="empty-text">暂无域数据</div>
-      <div class="empty-hint">记忆将按项目路径自动归类</div>
+      <div class="empty-text">
+        暂无域数据
+      </div>
+      <div class="empty-hint">
+        记忆将按项目路径自动归类
+      </div>
     </div>
 
     <!-- 域树 -->

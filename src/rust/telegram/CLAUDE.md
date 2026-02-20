@@ -61,8 +61,8 @@ pub struct TelegramConfig {
 
 ### 核心依赖
 ```toml
-teloxide = { version = "0.15.0", features = ["macros"] }
-tokio = { version = "1.0", features = ["sync"] }
+teloxide = { version = "0.15.0", features = [ "macros" ] }
+tokio = { version = "1.0", features = [ "sync" ] }
 regex = "1.0"
 ```
 

@@ -49,9 +49,12 @@ async fn test_proxy_connection(proxy: ProxyInfo) -> Result<bool, String>
 
 ### 核心依赖
 ```toml
-reqwest = { version = "0.11", features = ["socks", "json"] }
-tokio = { version = "1.0", features = ["net"] }
-serde = { version = "1.0", features = ["derive"] }
+reqwest = { version = "0.11", features = [
+  "socks",
+  "json"
+] }
+tokio = { version = "1.0", features = [ "net" ] }
+serde = { version = "1.0", features = [ "derive" ] }
 serde_json = "1.0"
 ```
 

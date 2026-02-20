@@ -1,7 +1,7 @@
 <script setup lang="ts">
+import { invoke } from '@tauri-apps/api/core'
 import { useMessage } from 'naive-ui'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { invoke } from '@tauri-apps/api/core'
 import { useAcemcpSync } from '../composables/useAcemcpSync'
 import { setupExitWarningListener } from '../composables/useExitWarning'
 import { useKeyboard } from '../composables/useKeyboard'

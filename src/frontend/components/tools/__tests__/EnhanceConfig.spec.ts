@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, expect, it } from 'vitest'
 
 /**
  * EnhanceConfig.vue - PROVIDER_PROTOCOL 显示逻辑测试
@@ -9,9 +9,9 @@ import { describe, it, expect } from 'vitest'
  * - 未定义供应商的优雅降级
  */
 
-describe('EnhanceConfig - PROVIDER_PROTOCOL', () => {
+describe('enhanceConfig - PROVIDER_PROTOCOL', () => {
   // 测试数据：与 EnhanceConfig.vue 中的 PROVIDER_PROTOCOL 保持一致
-  const PROVIDER_PROTOCOL: Record<string, { type: 'info' | 'success' | 'warning'; desc: string }> = {
+  const PROVIDER_PROTOCOL: Record<string, { type: 'info' | 'success' | 'warning', desc: string }> = {
     openai: { type: 'info', desc: 'OpenAI 原生格式（/chat/completions）' },
     grok: { type: 'info', desc: 'Grok (xAI) 兼容 OpenAI 格式，可直接使用 OpenAI SDK' },
     deepseek: { type: 'info', desc: 'DeepSeek 兼容 OpenAI 格式（/chat/completions）' },
@@ -25,7 +25,7 @@ describe('EnhanceConfig - PROVIDER_PROTOCOL', () => {
     it('should have info type for OpenAI compatible providers', () => {
       const openaiCompatProviders = ['openai', 'grok', 'deepseek', 'siliconflow', 'groq']
 
-      openaiCompatProviders.forEach(provider => {
+      openaiCompatProviders.forEach((provider) => {
         const protocol = PROVIDER_PROTOCOL[provider]
         expect(protocol).toBeDefined()
         expect(protocol.type).toBe('info')
@@ -36,7 +36,7 @@ describe('EnhanceConfig - PROVIDER_PROTOCOL', () => {
     it('should have success type for native format providers', () => {
       const nativeProviders = ['gemini', 'anthropic']
 
-      nativeProviders.forEach(provider => {
+      nativeProviders.forEach((provider) => {
         const protocol = PROVIDER_PROTOCOL[provider]
         expect(protocol).toBeDefined()
         expect(protocol.type).toBe('success')
@@ -46,20 +46,20 @@ describe('EnhanceConfig - PROVIDER_PROTOCOL', () => {
     })
 
     it('should display Grok special description', () => {
-      const grokProtocol = PROVIDER_PROTOCOL['grok']
+      const grokProtocol = PROVIDER_PROTOCOL.grok
       expect(grokProtocol.desc).toContain('可直接使用 OpenAI SDK')
       expect(grokProtocol.desc).toContain('xAI')
     })
 
     it('should display Groq speed advantage', () => {
-      const groqProtocol = PROVIDER_PROTOCOL['groq']
+      const groqProtocol = PROVIDER_PROTOCOL.groq
       expect(groqProtocol.desc).toContain('推理速度极快')
     })
   })
 
   describe('边界条件测试', () => {
     it('should return undefined for unknown provider', () => {
-      const unknownProtocol = PROVIDER_PROTOCOL['unknown_provider']
+      const unknownProtocol = PROVIDER_PROTOCOL.unknown_provider
       expect(unknownProtocol).toBeUndefined()
     })
 
@@ -70,7 +70,7 @@ describe('EnhanceConfig - PROVIDER_PROTOCOL', () => {
 
     it('should handle case-sensitive provider names', () => {
       // PROVIDER_PROTOCOL 使用小写 key，大写应返回 undefined
-      const uppercaseProtocol = PROVIDER_PROTOCOL['GROK']
+      const uppercaseProtocol = PROVIDER_PROTOCOL.GROK
       expect(uppercaseProtocol).toBeUndefined()
     })
   })
@@ -79,13 +79,13 @@ describe('EnhanceConfig - PROVIDER_PROTOCOL', () => {
     it('should have valid type values', () => {
       const validTypes = ['info', 'success', 'warning']
 
-      Object.values(PROVIDER_PROTOCOL).forEach(protocol => {
+      Object.values(PROVIDER_PROTOCOL).forEach((protocol) => {
         expect(validTypes).toContain(protocol.type)
       })
     })
 
     it('should have non-empty descriptions', () => {
-      Object.values(PROVIDER_PROTOCOL).forEach(protocol => {
+      Object.values(PROVIDER_PROTOCOL).forEach((protocol) => {
         expect(protocol.desc).toBeTruthy()
         expect(protocol.desc.length).toBeGreaterThan(0)
       })
@@ -96,7 +96,7 @@ describe('EnhanceConfig - PROVIDER_PROTOCOL', () => {
     it('should cover all major OpenAI compatible providers', () => {
       const requiredProviders = ['openai', 'grok', 'deepseek', 'siliconflow', 'groq']
 
-      requiredProviders.forEach(provider => {
+      requiredProviders.forEach((provider) => {
         expect(PROVIDER_PROTOCOL[provider]).toBeDefined()
       })
     })
@@ -104,7 +104,7 @@ describe('EnhanceConfig - PROVIDER_PROTOCOL', () => {
     it('should cover all native format providers', () => {
       const nativeProviders = ['gemini', 'anthropic']
 
-      nativeProviders.forEach(provider => {
+      nativeProviders.forEach((provider) => {
         expect(PROVIDER_PROTOCOL[provider]).toBeDefined()
       })
     })

@@ -28,6 +28,7 @@ pub mod registry;      // P0 新增
 pub mod uri_path;      // P1 新增
 pub mod vitality;      // P1 新增
 pub mod fts_index;     // P2 新增
+pub mod fts_actor;     // P2 新增：FTS5 Actor 模式
 pub mod summary;       // P2 新增
 pub mod summary_service;  // P2 新增：摘要生成服务（Provider 链 + 超时保护）
 pub mod observation_store;  // P3 新增

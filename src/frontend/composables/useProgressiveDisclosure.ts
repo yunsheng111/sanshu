@@ -3,7 +3,7 @@
  * 管理三态展示：collapsed（折叠）、expanded（展开）、detail（详情）
  * 用于记忆卡片的渐进式内容展示
  */
-import { computed, ref } from 'vue'
+import { ref } from 'vue'
 
 export type DisclosureState = 'collapsed' | 'expanded' | 'detail'
 

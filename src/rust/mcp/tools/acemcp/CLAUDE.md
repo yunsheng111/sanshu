@@ -193,14 +193,23 @@ AI 请求
 
 ### 核心依赖
 ```toml
-reqwest = { version = "0.11", features = ["stream", "json", "socks"] }
-tokio = { version = "1.0", features = ["fs", "process", "sync", "time"] }
+reqwest = { version = "0.11", features = [
+  "stream",
+  "json",
+  "socks"
+] }
+tokio = { version = "1.0", features = [
+  "fs",
+  "process",
+  "sync",
+  "time"
+] }
 ignore = "0.4"
 notify = "6.0"
 notify-debouncer-full = "0.3"
 encoding_rs = "0.8"
 globset = "0.4"
-ring = "0.17"     # SHA256 hash（缓存键）
+ring = "0.17" # SHA256 hash（缓存键）
 ```
 
 ### 配置字段

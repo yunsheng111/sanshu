@@ -1,10 +1,10 @@
+import { mount } from '@vue/test-utils'
+import { createPinia } from 'pinia'
 /**
  * McpToolsTab 集成测试
  * 验证 C1 修复：MemoryManager 组件正确挂载
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { mount } from '@vue/test-utils'
-import { createPinia } from 'pinia'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import McpToolsTab from '../McpToolsTab.vue'
 
 // Mock Tauri invoke
@@ -39,7 +39,7 @@ vi.mock('../../../composables/useMcpTools', () => ({
   }),
 }))
 
-describe('McpToolsTab', () => {
+describe('mcpToolsTab', () => {
   beforeEach(() => {
     vi.clearAllMocks()
   })

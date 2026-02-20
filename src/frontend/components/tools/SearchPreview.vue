@@ -1,7 +1,7 @@
 <!-- SC-9: 搜索结果预览组件 -->
 <script setup lang="ts">
+import { NCard, NSpace, NTag, NText } from 'naive-ui'
 import { computed } from 'vue'
-import { NCard, NEllipsis, NTag, NSpace, NText } from 'naive-ui'
 
 interface SearchResult {
   filePath: string
@@ -76,7 +76,9 @@ const sortedResults = computed(() => {
         <template #header>
           <NSpace align="center" :size="4">
             <span class="i-carbon-document text-blue-500" />
-            <NText strong>{{ getFileName(result.filePath) }}</NText>
+            <NText strong>
+              {{ getFileName(result.filePath) }}
+            </NText>
             <NText depth="3" class="text-xs">
               {{ getDirectory(result.filePath) }}
             </NText>

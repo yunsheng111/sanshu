@@ -51,7 +51,7 @@ const loadingConfig = ref(false)
 const showProxyModal = ref(false)
 
 // 本地嵌入配置
-const EMBEDDING_DEFAULTS: Record<string, { base_url: string; model: string; label: string }> = {
+const EMBEDDING_DEFAULTS: Record<string, { base_url: string, model: string, label: string }> = {
   jina: { base_url: 'https://api.jina.ai/v1', model: 'jina-embeddings-v3', label: 'Jina AI' },
   siliconflow: { base_url: 'https://api.siliconflow.cn/v1', model: 'BAAI/bge-m3', label: 'SiliconFlow' },
   ollama: { base_url: 'http://localhost:11434', model: 'nomic-embed-text', label: 'Ollama 本地' },
@@ -63,7 +63,7 @@ const EMBEDDING_DEFAULTS: Record<string, { base_url: string; model: string; labe
 const embeddingProviderOptions = Object.entries(EMBEDDING_DEFAULTS).map(([value, { label }]) => ({ label, value }))
 
 // 各嵌入提供者协议说明
-const EMBEDDING_PROTOCOL: Record<string, { type: 'info' | 'success' | 'warning'; desc: string }> = {
+const EMBEDDING_PROTOCOL: Record<string, { type: 'info' | 'success' | 'warning', desc: string }> = {
   jina: { type: 'info', desc: 'Jina AI 兼容 OpenAI Embeddings 格式（/embeddings）' },
   siliconflow: { type: 'info', desc: 'SiliconFlow 兼容 OpenAI Embeddings 格式，支持 BGE 等多种模型' },
   ollama: { type: 'success', desc: 'Ollama 本地嵌入，无需 API Key，数据不出本机' },

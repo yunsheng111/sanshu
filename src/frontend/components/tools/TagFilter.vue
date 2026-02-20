@@ -24,7 +24,8 @@ const selectedTags = computed({
   set: (val: string[]) => {
     if (injectedTags) {
       injectedTags.value = val
-    } else {
+    }
+    else {
       localSelectedTags.value = val
     }
   },
@@ -35,10 +36,10 @@ const selectedTags = computed({
 /** 获取标签的颜色类型（分类标签有对应颜色） */
 function getTagType(tag: string): 'default' | 'info' | 'success' | 'warning' | 'error' {
   const typeMap: Record<string, 'info' | 'success' | 'warning' | 'error'> = {
-    '规范': 'info',
-    '偏好': 'warning',
-    '模式': 'success',
-    '背景': 'warning',
+    规范: 'info',
+    偏好: 'warning',
+    模式: 'success',
+    背景: 'warning',
   }
   return typeMap[tag] || 'default'
 }
@@ -51,7 +52,8 @@ function toggleTag(tag: string) {
   const index = current.indexOf(tag)
   if (index >= 0) {
     current.splice(index, 1)
-  } else {
+  }
+  else {
     current.push(tag)
   }
   selectedTags.value = current

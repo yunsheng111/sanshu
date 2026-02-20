@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useMessage } from 'naive-ui'
+import { computed, ref } from 'vue'
 /**
  * 批量操作条组件
  * 底部固定显示，多选模式下提供批量操作
@@ -6,8 +8,6 @@
  * 操作前 confirm 弹窗确认
  */
 import { useSafeInvoke } from '../../composables/useSafeInvoke'
-import { useMessage } from 'naive-ui'
-import { computed, ref } from 'vue'
 
 // Props
 const props = defineProps<{
@@ -62,13 +62,16 @@ async function batchDelete() {
         projectPath: props.projectRootPath,
         memoryId: id,
       })
-      if (result !== null) successCount++
+      if (result !== null)
+        successCount++
     }
     message.success(`已删除 ${successCount} 条记忆`)
     emit('complete')
-  } catch (err) {
+  }
+  catch (err) {
     message.error(`批量删除失败: ${err}`)
-  } finally {
+  }
+  finally {
     actionLoading.value = false
   }
 }
@@ -91,13 +94,16 @@ async function batchReclassify() {
         memoryId: id,
         category: targetCategory.value,
       })
-      if (result !== null) successCount++
+      if (result !== null)
+        successCount++
     }
     message.success(`已重新分类 ${successCount} 条记忆`)
     emit('complete')
-  } catch (err) {
+  }
+  catch (err) {
     message.error(`批量分类失败: ${err}`)
-  } finally {
+  }
+  finally {
     actionLoading.value = false
   }
 }
@@ -126,9 +132,11 @@ async function batchExport() {
     URL.revokeObjectURL(url)
 
     message.success(`已导出 ${selectedMemories.length} 条记忆`)
-  } catch (err) {
+  }
+  catch (err) {
     message.error(`导出失败: ${err}`)
-  } finally {
+  }
+  finally {
     actionLoading.value = false
   }
 }
@@ -145,9 +153,11 @@ async function refreshVitality() {
       message.success('活力值已刷新')
       emit('complete')
     }
-  } catch (err) {
+  }
+  catch (err) {
     message.error(`刷新活力值失败: ${err}`)
-  } finally {
+  }
+  finally {
     actionLoading.value = false
   }
 }

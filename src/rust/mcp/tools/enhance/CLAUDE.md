@@ -180,8 +180,15 @@ AI 请求
 
 ### 核心依赖
 ```toml
-reqwest = { version = "0.11", features = ["stream", "json"] }
-tokio = { version = "1.0", features = ["fs", "sync", "time"] }
+reqwest = { version = "0.11", features = [
+  "stream",
+  "json"
+] }
+tokio = { version = "1.0", features = [
+  "fs",
+  "sync",
+  "time"
+] }
 futures-util = "0.3"
 regex = "1.0"
 anyhow = "1.0"

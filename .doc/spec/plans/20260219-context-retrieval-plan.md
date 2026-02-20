@@ -648,10 +648,12 @@ export function useSafeInvoke() {
         ),
       ])
       return result
-    } catch (e) {
+    }
+    catch (e) {
       error.value = e instanceof Error ? e.message : String(e)
       return null
-    } finally {
+    }
+    finally {
       loading.value = false
     }
   }

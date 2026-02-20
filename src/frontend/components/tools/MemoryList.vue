@@ -192,10 +192,10 @@ function formatDate(isoString: string): string {
 // 获取分类图标
 function getCategoryIcon(category: string): string {
   const icons: Record<string, string> = {
-    '规范': 'i-carbon-rule',
-    '偏好': 'i-carbon-user-favorite',
-    '模式': 'i-carbon-flow',
-    '背景': 'i-carbon-document',
+    规范: 'i-carbon-rule',
+    偏好: 'i-carbon-user-favorite',
+    模式: 'i-carbon-flow',
+    背景: 'i-carbon-document',
   }
   return icons[category] || 'i-carbon-document'
 }
@@ -203,10 +203,10 @@ function getCategoryIcon(category: string): string {
 // 获取分类颜色（左侧色条渐变）
 function getCategoryAccentColor(category: string): string {
   const colors: Record<string, string> = {
-    '规范': 'linear-gradient(180deg, #3b82f6, #60a5fa)',
-    '偏好': 'linear-gradient(180deg, #a855f7, #c084fc)',
-    '模式': 'linear-gradient(180deg, #22c55e, #4ade80)',
-    '背景': 'linear-gradient(180deg, #f97316, #fb923c)',
+    规范: 'linear-gradient(180deg, #3b82f6, #60a5fa)',
+    偏好: 'linear-gradient(180deg, #a855f7, #c084fc)',
+    模式: 'linear-gradient(180deg, #22c55e, #4ade80)',
+    背景: 'linear-gradient(180deg, #f97316, #fb923c)',
   }
   return colors[category] || 'linear-gradient(180deg, #9ca3af, #d1d5db)'
 }
@@ -214,10 +214,10 @@ function getCategoryAccentColor(category: string): string {
 // 获取分类标签背景色
 function getCategoryBgClass(category: string): string {
   const classes: Record<string, string> = {
-    '规范': 'category-badge--rule',
-    '偏好': 'category-badge--preference',
-    '模式': 'category-badge--pattern',
-    '背景': 'category-badge--context',
+    规范: 'category-badge--rule',
+    偏好: 'category-badge--preference',
+    模式: 'category-badge--pattern',
+    背景: 'category-badge--context',
   }
   return classes[category] || ''
 }
@@ -289,8 +289,12 @@ defineExpose({
       <div class="empty-icon-container">
         <div class="i-carbon-document" aria-hidden="true" />
       </div>
-      <div class="empty-text">暂无记忆条目</div>
-      <div class="empty-hint">通过 MCP 工具添加记忆后将在此显示</div>
+      <div class="empty-text">
+        暂无记忆条目
+      </div>
+      <div class="empty-hint">
+        通过 MCP 工具添加记忆后将在此显示
+      </div>
     </div>
 
     <!-- 过滤后为空 -->
@@ -298,8 +302,12 @@ defineExpose({
       <div class="empty-icon-container">
         <div class="i-carbon-filter" aria-hidden="true" />
       </div>
-      <div class="empty-text">当前分类下暂无记忆</div>
-      <div class="empty-hint">尝试切换其他分类查看</div>
+      <div class="empty-text">
+        当前分类下暂无记忆
+      </div>
+      <div class="empty-hint">
+        尝试切换其他分类查看
+      </div>
     </div>
 
     <!-- 列表 -->
@@ -342,7 +350,7 @@ defineExpose({
             <template v-else>
               <div class="memory-header">
                 <div class="memory-category">
-                  <span :class="['category-badge', getCategoryBgClass(memory.category)]">
+                  <span class="category-badge" :class="[getCategoryBgClass(memory.category)]">
                     <div :class="getCategoryIcon(memory.category)" aria-hidden="true" />
                     {{ memory.category }}
                   </span>

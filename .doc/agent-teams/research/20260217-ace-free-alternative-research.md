@@ -339,7 +339,7 @@ pub search_top_k: Option<usize>,                    // 默认 10
 ```toml
 # 无需新增重依赖！复用现有：reqwest / serde / serde_json / ring / tokio
 # 仅新增（sou 备选模式用）：
-bincode = "1.3"    # 向量数据紧凑序列化（~50KB 编译产物）
+bincode = "1.3" # 向量数据紧凑序列化（~50KB 编译产物）
 ```
 
 ---

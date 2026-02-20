@@ -171,7 +171,7 @@ describe('useVitalityDecay', () => {
     it('超过 7 天的数据应只取最近 7 天', () => {
       const { getTrend } = useVitalityDecay()
       // 前 23 天稳定，最近 7 天递增 -> 应返回 up
-      const data = Array(23).fill(1.0).concat([1.0, 1.0, 1.0, 2.0, 2.0, 2.0, 2.0])
+      const data = Array.from({ length: 23 }).fill(1.0).concat([1.0, 1.0, 1.0, 2.0, 2.0, 2.0, 2.0])
       expect(getTrend(data)).toBe('up')
     })
 

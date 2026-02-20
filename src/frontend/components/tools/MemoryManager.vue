@@ -7,16 +7,16 @@
  */
 import { computed, provide, ref } from 'vue'
 import DomainTree from './DomainTree.vue'
-import MemoryWorkspace from './MemoryWorkspace.vue'
-import MemorySearch from './MemorySearch.vue'
 import MemoryConfig from './MemoryConfig.vue'
 import {
+  MEMORY_BATCH_MODE_KEY,
   MEMORY_DOMAIN_KEY,
   MEMORY_SEARCH_KEY,
-  MEMORY_TAGS_KEY,
-  MEMORY_BATCH_MODE_KEY,
   MEMORY_SELECTED_IDS_KEY,
+  MEMORY_TAGS_KEY,
 } from './memoryKeys'
+import MemorySearch from './MemorySearch.vue'
+import MemoryWorkspace from './MemoryWorkspace.vue'
 
 // Props
 const props = defineProps<{
@@ -112,7 +112,9 @@ function exitBatchMode() {
               <span>记忆空间</span>
             </div>
             <n-button quaternary size="tiny" class="sider-collapse-btn" @click="siderCollapsed = true">
-              <template #icon><div class="i-carbon-chevron-left" /></template>
+              <template #icon>
+                <div class="i-carbon-chevron-left" />
+              </template>
             </n-button>
           </div>
           <n-scrollbar class="sider-scroll">

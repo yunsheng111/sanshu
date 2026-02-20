@@ -146,8 +146,8 @@ await listen('config_reloaded', () => { /* 重新加载配置 */ })
 ```typescript
 // i18n/index.ts
 import { createI18n } from 'vue-i18n'
-import zh from './zh'
 import en from './en'
+import zh from './zh'
 
 export const i18n = createI18n<[MessageSchema], 'zh' | 'en'>({
   legacy: false,

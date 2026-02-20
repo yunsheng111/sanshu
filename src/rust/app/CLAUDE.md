@@ -72,7 +72,11 @@ async fn exit_app() -> Result<(), String>
 
 ### 核心依赖
 ```toml
-tauri = { version = "2.0", features = ["tray-icon", "image-ico", "image-png"] }
+tauri = { version = "2.0", features = [
+  "tray-icon",
+  "image-ico",
+  "image-png"
+] }
 tauri-plugin-shell = "2.0"
 tauri-plugin-updater = "2.0"
 anyhow = "1.0"

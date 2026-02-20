@@ -75,8 +75,8 @@ pub struct Context7Request {
 
 ### 核心依赖
 ```toml
-reqwest = { version = "0.11", features = ["json"] }
-serde = { version = "1.0", features = ["derive"] }
+reqwest = { version = "0.11", features = [ "json" ] }
+serde = { version = "1.0", features = [ "derive" ] }
 serde_json = "1.0"
 anyhow = "1.0"
 ```
