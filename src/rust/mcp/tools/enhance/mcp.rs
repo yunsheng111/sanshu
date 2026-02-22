@@ -128,12 +128,17 @@ impl EnhanceTool {
                     );
                     Ok(CallToolResult::success(vec![Content::text(result_text)]))
                 } else {
-                    // 失败：返回错误信息
+                    // 失败：返回带 is_error 标记的错误信息
                     let error_text = format!(
                         "增强失败: {}",
                         response.error.unwrap_or_else(|| "未知错误".to_string())
                     );
-                    Ok(CallToolResult::success(vec![Content::text(error_text)]))
+                    Ok(CallToolResult {
+                        content: vec![Content::text(error_text)],
+                        is_error: Some(true),
+                        structured_content: None,
+                        meta: None,
+                    })
                 }
             }
             Err(e) => {

@@ -68,19 +68,15 @@ pub async fn verify_consistency(
         .map_err(|e| anyhow::anyhow!("获取 JSON 记忆列表失败: {}", e))?;
     let json_ids: HashSet<String> = json_entries.iter().map(|e| e.id.clone()).collect();
 
-    // 2. 从 FTS 获取所有 IDs（通过空查询）
+    // 2. 从 FTS 获取所有 IDs（通过 GetAllIds 消息）
     let (tx, rx) = oneshot::channel();
-    let request = SearchRequest {
-        query: String::new(), // 空查询匹配所有记录
-        limit: 10000,         // 足够大的限制（假设记忆总数 < 10000）
-    };
 
-    fts_tx.send(FtsMessage::Search(request, tx))
+    fts_tx.send(FtsMessage::GetAllIds(tx))
         .await
-        .map_err(|e| anyhow::anyhow!("发送 FTS 搜索请求失败: {}", e))?;
+        .map_err(|e| anyhow::anyhow!("发送 FTS GetAllIds 请求失败: {}", e))?;
 
     let fts_results = rx.await
-        .map_err(|e| anyhow::anyhow!("接收 FTS 搜索结果失败: {}", e))??;
+        .map_err(|e| anyhow::anyhow!("接收 FTS GetAllIds 结果失败: {}", e))??;
 
     let fts_ids: HashSet<String> = fts_results.into_iter().collect();
 
@@ -228,14 +224,17 @@ mod tests {
         let fts_index = FtsIndex::open(temp.path()).unwrap();
         let fts_tx = spawn_fts_actor(fts_index);
 
-        // 创建 MemoryManager 并添加记忆
-        let manager = MemoryManager::new(temp.path().to_str().unwrap()).unwrap();
+        // 创建 MemoryManager 并禁用去重（测试环境）
+        let mut manager = MemoryManager::new(temp.path().to_str().unwrap()).unwrap();
+        let mut config = manager.config().clone();
+        config.enable_dedup = false;
+        manager.update_config(config).unwrap();
         let shared_manager = SharedMemoryManager::from_arc(
             std::sync::Arc::new(std::sync::RwLock::new(manager))
         );
 
-        let id1 = shared_manager.add_memory("测试内容1", MemoryCategory::Rule).unwrap().unwrap();
-        let id2 = shared_manager.add_memory("测试内容2", MemoryCategory::Pattern).unwrap().unwrap();
+        let id1 = shared_manager.add_memory("这是第一条完全不同的测试记忆内容", MemoryCategory::Rule).unwrap().expect("应返回新记忆 ID");
+        let id2 = shared_manager.add_memory("这是第二条完全不同的测试记忆内容", MemoryCategory::Pattern).unwrap().expect("应返回新记忆 ID");
 
         // 手动同步到 FTS
         let entries = shared_manager.get_all_memories().unwrap();
@@ -243,8 +242,8 @@ mod tests {
             fts_tx.send(FtsMessage::Sync(entry)).await.unwrap();
         }
 
-        // 等待 FTS Actor 同步
-        sleep(Duration::from_millis(200)).await;
+        // 等待 FTS Actor 同步（增加等待时间确保异步处理完成）
+        sleep(Duration::from_millis(500)).await;
 
         // 验证一致性
         let report = verify_consistency(&shared_manager, &fts_tx).await.unwrap();
@@ -270,14 +269,17 @@ mod tests {
         let fts_index = FtsIndex::open(temp.path()).unwrap();
         let fts_tx = spawn_fts_actor(fts_index);
 
-        // 创建 MemoryManager 并添加记忆（不同步到 FTS）
-        let manager = MemoryManager::new(temp.path().to_str().unwrap()).unwrap();
+        // 创建 MemoryManager 并禁用去重（测试环境）
+        let mut manager = MemoryManager::new(temp.path().to_str().unwrap()).unwrap();
+        let mut config = manager.config().clone();
+        config.enable_dedup = false;
+        manager.update_config(config).unwrap();
         let shared_manager = SharedMemoryManager::from_arc(
             std::sync::Arc::new(std::sync::RwLock::new(manager))
         );
 
-        let id1 = shared_manager.add_memory("测试内容1", MemoryCategory::Rule).unwrap().unwrap();
-        let id2 = shared_manager.add_memory("测试内容2", MemoryCategory::Pattern).unwrap().unwrap();
+        let id1 = shared_manager.add_memory("这是第一条完全不同的测试记忆内容", MemoryCategory::Rule).unwrap().expect("应返回新记忆 ID");
+        let id2 = shared_manager.add_memory("这是第二条完全不同的测试记忆内容", MemoryCategory::Pattern).unwrap().expect("应返回新记忆 ID");
 
         // 验证一致性
         let report = verify_consistency(&shared_manager, &fts_tx).await.unwrap();
@@ -345,14 +347,17 @@ mod tests {
         let fts_index = FtsIndex::open(temp.path()).unwrap();
         let fts_tx = spawn_fts_actor(fts_index);
 
-        // 创建 MemoryManager 并添加记忆（不同步到 FTS）
-        let manager = MemoryManager::new(temp.path().to_str().unwrap()).unwrap();
+        // 创建 MemoryManager 并禁用去重（测试环境）
+        let mut manager = MemoryManager::new(temp.path().to_str().unwrap()).unwrap();
+        let mut config = manager.config().clone();
+        config.enable_dedup = false;
+        manager.update_config(config).unwrap();
         let shared_manager = SharedMemoryManager::from_arc(
             std::sync::Arc::new(std::sync::RwLock::new(manager))
         );
 
-        let id1 = shared_manager.add_memory("测试内容1", MemoryCategory::Rule).unwrap().unwrap();
-        let id2 = shared_manager.add_memory("测试内容2", MemoryCategory::Pattern).unwrap().unwrap();
+        let id1 = shared_manager.add_memory("这是第一条完全不同的测试记忆内容", MemoryCategory::Rule).unwrap().expect("应返回新记忆 ID");
+        let id2 = shared_manager.add_memory("这是第二条完全不同的测试记忆内容", MemoryCategory::Pattern).unwrap().expect("应返回新记忆 ID");
 
         // 验证一致性（应有缺失）
         let report = verify_consistency(&shared_manager, &fts_tx).await.unwrap();
@@ -436,7 +441,7 @@ mod tests {
             std::sync::Arc::new(std::sync::RwLock::new(manager))
         );
 
-        let id1 = shared_manager.add_memory("测试内容1", MemoryCategory::Rule).unwrap().unwrap();
+        let id1 = shared_manager.add_memory("测试内容1", MemoryCategory::Rule).unwrap().expect("应返回新记忆 ID");
 
         sleep(Duration::from_millis(100)).await;
 

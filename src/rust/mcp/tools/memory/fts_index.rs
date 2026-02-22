@@ -113,6 +113,15 @@ impl FtsIndex {
         Ok(ids)
     }
 
+    /// 获取所有记忆 ID（用于一致性检查）
+    pub fn get_all_ids(&self) -> Result<Vec<String>> {
+        let mut stmt = self.conn.prepare("SELECT id FROM memory_fts")?;
+        let ids: Vec<String> = stmt.query_map([], |row| {
+            row.get(0)
+        })?.filter_map(|r| r.ok()).collect();
+        Ok(ids)
+    }
+
     /// 删除单条记忆的索引
     pub fn delete_entry(&self, id: &str) -> Result<()> {
         self.conn.execute(

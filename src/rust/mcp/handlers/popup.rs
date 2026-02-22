@@ -93,31 +93,69 @@ pub fn create_tauri_popup(request: &PopupRequest) -> Result<String> {
 ///
 /// 按优先级查找：同目录 -> 全局版本 -> 开发环境
 fn find_ui_command() -> Result<String> {
-    // 1. 优先尝试与当前 MCP 服务器同目录的等一下命令
+    // 1. Prefer GUI executable in the same directory as MCP server.
     if let Ok(current_exe) = std::env::current_exe() {
         if let Some(exe_dir) = current_exe.parent() {
-            let local_ui_path = exe_dir.join("等一下");
-            if local_ui_path.exists() && is_executable(&local_ui_path) {
-                return Ok(local_ui_path.to_string_lossy().to_string());
+            #[cfg(windows)]
+            let local_candidates = ["sanshu-gui.exe", "sanshu-gui"];
+
+            #[cfg(not(windows))]
+            let local_candidates = ["sanshu-gui"];
+
+            for candidate in local_candidates {
+                let local_ui_path = exe_dir.join(candidate);
+                if local_ui_path.exists() && is_executable(&local_ui_path) {
+                    return Ok(local_ui_path.to_string_lossy().to_string());
+                }
             }
         }
     }
 
-    // 2. 尝试全局命令（最常见的部署方式）
-    if test_command_available("等一下") {
-        return Ok("等一下".to_string());
+    // 2. Fallback to global command.
+    if test_command_available("sanshu-gui") {
+        return Ok("sanshu-gui".to_string());
     }
 
-    // 3. 如果都找不到，返回详细错误信息
+    // 3. Development environment detection (target/debug or target/release)
+    if let Ok(current_exe) = std::env::current_exe() {
+        if let Some(exe_dir) = current_exe.parent() {
+            // Check if we're in target/debug or target/release
+            let exe_dir_str = exe_dir.to_string_lossy();
+            if exe_dir_str.contains("target/debug") || exe_dir_str.contains("target\\debug")
+                || exe_dir_str.contains("target/release") || exe_dir_str.contains("target\\release") {
+
+                // Try to find GUI in the same target directory
+                #[cfg(windows)]
+                let dev_candidates = ["sanshu.exe", "等一下.exe"];
+
+                #[cfg(not(windows))]
+                let dev_candidates = ["sanshu", "等一下"];
+
+                for candidate in dev_candidates {
+                    let dev_ui_path = exe_dir.join(candidate);
+                    if dev_ui_path.exists() && is_executable(&dev_ui_path) {
+                        log_important!(
+                            info,
+                            "[popup] 开发环境检测：使用同目录 GUI 可执行文件: {}",
+                            dev_ui_path.display()
+                        );
+                        return Ok(dev_ui_path.to_string_lossy().to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    // 4. Return detailed error when command cannot be found.
     anyhow::bail!(
-        "找不到等一下 UI 命令。请确保：\n\
-         1. 已编译项目：cargo build --release\n\
-         2. 或已全局安装：./install.sh\n\
-         3. 或等一下命令在同目录下"
+        "UI command not found (tried sanshu-gui). Please ensure:\n\
+         1. Build is done: cargo build --release\n\
+         2. Or install script has run: ./install.sh\n\
+         3. Or the executable is in the same directory as MCP server"
     )
 }
 
-/// 测试命令是否可用
+
 fn test_command_available(command: &str) -> bool {
     Command::new(command)
         .arg("--version")
@@ -138,10 +176,15 @@ fn is_executable(path: &Path) -> bool {
 
     #[cfg(windows)]
     {
-        // Windows 上检查文件扩展名
+        if !path.is_file() {
+            return false;
+        }
+
+        // Prefer .exe on Windows, and allow extensionless executable names.
         path.extension()
             .and_then(|ext| ext.to_str())
             .map(|ext| ext.eq_ignore_ascii_case("exe"))
-            .unwrap_or(false)
+            .unwrap_or(true)
     }
 }
+

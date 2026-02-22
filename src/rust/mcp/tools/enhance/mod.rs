@@ -20,5 +20,5 @@ pub use history::ChatHistoryManager;
 pub use utils::mask_api_key;
 pub use chat_client::{ChatClient, ChatProvider, Message};
 pub use rule_engine::{RuleEnhancer, EnhanceContext};
-pub use provider_factory::{build_enhance_client, build_enhance_client_async};
+pub use provider_factory::build_enhance_candidates_async;
 pub use cache::{get_cached_enhance, put_cached_enhance, clear_enhance_cache, get_enhance_cache_stats};

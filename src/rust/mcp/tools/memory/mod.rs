@@ -42,6 +42,8 @@ pub use manager::MemoryManager;
 pub use manager::SharedMemoryManager;
 pub use types::{MemoryEntry, MemoryCategory, MemoryMetadata, MemoryStore, MemoryConfig, DomainInfo};
 pub use mcp::MemoryTool;
+// T5: 导出搜索相关 DTO 类型
+pub use mcp::{SearchMode, SearchResult, FtsSearchItem};
 pub use similarity::TextSimilarity;
 pub use dedup::{MemoryDeduplicator, DuplicateInfo, DedupResult};
 pub use migration::{MemoryMigrator, MigrationResult};

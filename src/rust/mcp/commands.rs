@@ -698,6 +698,9 @@ pub struct EnhanceConfigDto {
     pub api_key: String,
     /// 模型名称
     pub model: String,
+    /// 降级链通道顺序（可选）：如 ["ollama", "cloud", "rule_engine"]
+    #[serde(default)]
+    pub channel_order: Option<Vec<String>>,
 }
 
 /// 获取提示词增强配置
@@ -713,6 +716,7 @@ pub async fn get_enhance_config(state: State<'_, AppState>) -> Result<EnhanceCon
         base_url: mcp.enhance_base_url.clone().unwrap_or_default(),
         api_key: mcp.enhance_api_key.clone().unwrap_or_default(),
         model: mcp.enhance_model.clone().unwrap_or_else(|| "Qwen/Qwen2.5-Coder-7B-Instruct".to_string()),
+        channel_order: mcp.enhance_channel_order.clone(),
     })
 }
 
@@ -733,6 +737,7 @@ pub async fn save_enhance_config(
         mcp.enhance_base_url = if config_dto.base_url.is_empty() { None } else { Some(config_dto.base_url) };
         mcp.enhance_api_key = if config_dto.api_key.is_empty() { None } else { Some(config_dto.api_key) };
         mcp.enhance_model = Some(config_dto.model);
+        mcp.enhance_channel_order = config_dto.channel_order;
     }
 
     save_config(&state, &app).await

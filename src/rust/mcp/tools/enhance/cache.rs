@@ -247,4 +247,71 @@ mod tests {
         assert!(cache.get("p3", None).is_none());
         assert!(cache.get("p1", None).is_some());
     }
+
+    // ========================================================================
+    // 性能基准测试
+    // ========================================================================
+
+    /// 性能基准：缓存写入吞吐量
+    #[test]
+    fn test_perf_cache_put_throughput() {
+        let mut cache = EnhanceCache::new(Duration::from_secs(3600), 1000);
+
+        let start = std::time::Instant::now();
+        for i in 0..1000 {
+            cache.put(
+                &format!("prompt_{}", i),
+                Some("/project"),
+                format!("enhanced result for prompt {}", i),
+            );
+        }
+        let elapsed = start.elapsed();
+        println!("[Cache PUT] 1000 次写入 => {:?} (avg {:?}/op)", elapsed, elapsed / 1000);
+        assert!(elapsed.as_millis() < 500, "缓存写入过慢: {:?}", elapsed);
+    }
+
+    /// 性能基准：缓存命中读取延迟
+    #[test]
+    fn test_perf_cache_get_hit() {
+        let mut cache = EnhanceCache::new(Duration::from_secs(3600), 500);
+        // 预填充
+        for i in 0..500 {
+            cache.put(&format!("p{}", i), None, format!("r{}", i));
+        }
+
+        let start = std::time::Instant::now();
+        let mut hits = 0;
+        for i in 0..500 {
+            if cache.get(&format!("p{}", i), None).is_some() {
+                hits += 1;
+            }
+        }
+        let elapsed = start.elapsed();
+        println!(
+            "[Cache GET] 500 次读取 => {:?} (avg {:?}/op), 命中率={:.1}%",
+            elapsed, elapsed / 500, (hits as f64 / 500.0) * 100.0
+        );
+        assert_eq!(hits, 500, "预填充后应全部命中");
+        assert!(elapsed.as_millis() < 200, "缓存读取过慢: {:?}", elapsed);
+    }
+
+    /// 性能基准：LRU 淘汰压力测试
+    #[test]
+    fn test_perf_cache_lru_pressure() {
+        let mut cache = EnhanceCache::new(Duration::from_secs(3600), 50);
+
+        // 写入 200 条，触发 150 次 LRU 淘汰
+        let start = std::time::Instant::now();
+        for i in 0..200 {
+            cache.put(&format!("p{}", i), None, format!("r{}", i));
+        }
+        let elapsed = start.elapsed();
+        let stats = cache.stats();
+        println!(
+            "[Cache LRU] 200 次写入(max=50) => {:?}, 最终条目={}, 淘汰次数≈150",
+            elapsed, stats.total_entries
+        );
+        assert_eq!(stats.total_entries, 50, "应保持最大条目数");
+        assert!(elapsed.as_millis() < 1000, "LRU 淘汰过慢: {:?}", elapsed);
+    }
 }

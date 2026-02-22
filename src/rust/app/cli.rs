@@ -207,6 +207,8 @@ fn handle_mcp_request(request_file: &str) -> Result<()> {
                     .block_on(handle_telegram_only_mcp_request(request_file))
                 {
                     log_important!(error, "处理Telegram请求失败: {}", e);
+                    // 输出结构化错误响应到 stdout，供 MCP 客户端解析
+                    eprintln!("{{\"error\": \"Telegram发送失败\", \"details\": \"{}\"}}", e);
                     std::process::exit(1);
                 }
             } else {
@@ -294,12 +296,12 @@ fn print_help() {
     println!("三术 - 智能代码审查工具");
     println!();
     println!("用法:");
-    println!("  等一下                              启动设置界面");
-    println!("  等一下 --mcp-request <文件>          处理 MCP 请求");
-    println!("  等一下 --cli [选项]                  命令行独立调用 zhi 交互");
-    println!("  等一下 --icon-search [选项]          打开图标选择界面");
-    println!("  等一下 --help                       显示此帮助信息");
-    println!("  等一下 --version                    显示版本信息");
+    println!("  sanshu-gui                         启动设置界面");
+    println!("  sanshu-gui --mcp-request <文件>     处理 MCP 请求");
+    println!("  sanshu-gui --cli [选项]             命令行独立调用 zhi 交互");
+    println!("  sanshu-gui --icon-search [选项]     打开图标选择界面");
+    println!("  sanshu-gui --help                  显示此帮助信息");
+    println!("  sanshu-gui --version               显示版本信息");
     println!();
     println!("CLI 交互选项:");
     println!("  --message, -m <内容>                 必填，弹窗消息");

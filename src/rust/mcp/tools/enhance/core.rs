@@ -14,6 +14,8 @@ use futures_util::StreamExt;
 use super::types::*;
 use super::history::ChatHistoryManager;
 use super::utils::mask_api_key;
+use super::chat_client::{ChatClient, ChatProvider, Message};
+use super::rule_engine::{RuleEnhancer, EnhanceContext};
 use crate::mcp::tools::interaction::ZhiHistoryManager;
 use crate::mcp::tools::acemcp::mcp::ProjectsFile;
 use crate::{log_debug, log_important};
@@ -57,11 +59,13 @@ struct BuildPayloadResult {
 
 /// 提示词增强器
 pub struct PromptEnhancer {
-    /// Augment API 基础 URL
+    /// 统一 Chat 客户端列表（支持 fallback 降级链）
+    chat_clients: Vec<ChatClient>,
+    /// Augment API 基础 URL（兼容旧路径）
     base_url: String,
-    /// API Token
+    /// API Token（兼容旧路径）
     token: String,
-    /// HTTP 客户端
+    /// HTTP 客户端（兼容旧路径）
     client: Client,
     /// 项目根路径
     project_root: Option<String>,
@@ -102,8 +106,29 @@ impl PromptEnhancer {
             .build()?;
 
         Ok(Self {
+            chat_clients: Vec::new(),
             base_url: normalize_base_url(base_url),
             token: token.to_string(),
+            client,
+            project_root: None,
+        })
+    }
+
+    /// 创建增强器实例（使用 ChatClient 列表，支持 fallback 降级链）
+    pub fn with_chat_clients(chat_clients: Vec<ChatClient>) -> Result<Self> {
+        let client = Client::builder()
+            .timeout(Duration::from_secs(120))
+            .build()?;
+
+        // 从第一个候选获取 base_url 和 token（用于旧路径兼容）
+        let (base_url, token) = chat_clients.first()
+            .map(|c| (c.base_url.clone(), c.api_key.clone().unwrap_or_default()))
+            .unwrap_or_default();
+
+        Ok(Self {
+            chat_clients,
+            base_url,
+            token,
             client,
             project_root: None,
         })
@@ -132,33 +157,33 @@ impl PromptEnhancer {
     /// 从 McpConfig 创建增强器（v5 新增，支持三级降级链）
     pub async fn from_mcp_config() -> Result<Self> {
         use crate::config::storage::load_standalone_config;
-        use crate::mcp::tools::enhance::provider_factory::build_enhance_client_async;
+        use crate::mcp::tools::enhance::provider_factory::build_enhance_candidates_async;
 
         let config = load_standalone_config().unwrap_or_default();
         let mcp_config = config.mcp_config;
-        let chat_client = build_enhance_client_async(&mcp_config).await;
+        let chat_clients = build_enhance_candidates_async(&mcp_config).await;
 
         log_important!(
             info,
-            "enhance 提供者: {:?}, model={}",
-            chat_client.provider,
-            chat_client.model
+            "enhance 候选列表: {} 个候选 [{}]",
+            chat_clients.len(),
+            chat_clients.iter()
+                .map(|c| format!("{:?}", c.provider))
+                .collect::<Vec<_>>()
+                .join(" -> ")
         );
 
-        // 对于 Augment 兼容路径，仍使用原有 PromptEnhancer
-        // 对于新提供者，base_url/token 从 chat_client 中读取
-        let base_url = if chat_client.base_url.is_empty() {
-            "rule_engine".to_string()
-        } else {
-            chat_client.base_url.clone()
-        };
-        let token = chat_client.api_key.clone().unwrap_or_default();
-
-        if !token.is_empty() {
-            log_important!(info, "API Key: {}", mask_api_key(&token));
+        // 为第一个非 RuleEngine 候选记录详细日志
+        if let Some(primary) = chat_clients.iter().find(|c| c.provider != ChatProvider::RuleEngine) {
+            log_important!(info, "主候选: {:?}, model={}", primary.provider, primary.model);
+            if let Some(ref key) = primary.api_key {
+                if !key.is_empty() {
+                    log_important!(info, "API Key: {}", mask_api_key(key));
+                }
+            }
         }
 
-        Self::new(&base_url, &token)
+        Self::with_chat_clients(chat_clients)
     }
 
     /// 加载项目的 blob_names（返回匹配到的项目根路径）
@@ -542,13 +567,80 @@ impl PromptEnhancer {
         let history_count = build.history_diag.loaded_count;
         let history_load_error = build.history_diag.load_error.clone();
         let history_fallback_used = build.history_diag.fallback_used;
-        let payload = build.payload;
-        // 中文注释：返回给前端的“原始提示词”优先使用传入的 original_prompt
+        // 中文注释：返回给前端的"原始提示词"优先使用传入的 original_prompt
         let response_original_prompt = request.original_prompt.clone()
             .unwrap_or_else(|| request.prompt.clone());
 
+        // 如果有 ChatClient 列表，使用 fallback 降级链
+        if !self.chat_clients.is_empty() {
+            let mut last_error: Option<String> = None;
+            for (idx, chat_client) in self.chat_clients.iter().enumerate() {
+                log_important!(
+                    info,
+                    "enhance fallback: 尝试候选 {}/{} — {:?} (model={})",
+                    idx + 1,
+                    self.chat_clients.len(),
+                    chat_client.provider,
+                    chat_client.model
+                );
+                match self.enhance_via_chat_client(
+                    chat_client,
+                    &request.prompt,
+                    &response_original_prompt,
+                    blob_count,
+                    history_count,
+                    history_load_error.clone(),
+                    history_fallback_used,
+                    project_root_path.clone(),
+                    blob_source_root.clone(),
+                    request_id.clone(),
+                ).await {
+                    Ok(resp) if resp.success => return Ok(resp),
+                    Ok(resp) => {
+                        let err_msg = resp.error.unwrap_or_else(|| "未知错误".to_string());
+                        log_important!(
+                            warn,
+                            "enhance fallback: 候选 {:?} 失败 — {}，尝试下一个",
+                            chat_client.provider,
+                            err_msg
+                        );
+                        last_error = Some(err_msg);
+                    }
+                    Err(e) => {
+                        log_important!(
+                            warn,
+                            "enhance fallback: 候选 {:?} 异常 — {}，尝试下一个",
+                            chat_client.provider,
+                            e
+                        );
+                        last_error = Some(format!("{}", e));
+                    }
+                }
+            }
+            // 所有候选均失败
+            return Ok(EnhanceResponse {
+                enhanced_prompt: String::new(),
+                original_prompt: response_original_prompt,
+                success: false,
+                error: Some(format!(
+                    "所有 {} 个候选均失败，最后错误: {}",
+                    self.chat_clients.len(),
+                    last_error.unwrap_or_default()
+                )),
+                blob_count,
+                history_count,
+                history_load_error,
+                history_fallback_used,
+                project_root_path,
+                blob_source_root,
+                request_id: Some(request_id),
+            });
+        }
+
+        // 回退到旧的 Augment API 流式路径
+        let payload = build.payload;
         let url = format!("{}/chat-stream", self.base_url);
-        log_important!(info, "发送增强请求: url={}", url);
+        log_important!(info, "发送增强请求（Augment API）: url={}", url);
 
         let response = self.client
             .post(&url)
@@ -629,6 +721,103 @@ impl PromptEnhancer {
         })
     }
 
+    /// 使用 ChatClient 进行增强（支持 Ollama / OpenAI 兼容 / 规则引擎）
+    async fn enhance_via_chat_client(
+        &self,
+        chat_client: &ChatClient,
+        prompt: &str,
+        original_prompt: &str,
+        blob_count: usize,
+        history_count: usize,
+        history_load_error: Option<String>,
+        history_fallback_used: bool,
+        project_root_path: Option<String>,
+        blob_source_root: Option<String>,
+        request_id: String,
+    ) -> Result<EnhanceResponse> {
+        // 如果是规则引擎，使用本地规则增强
+        if chat_client.provider == ChatProvider::RuleEngine {
+            log_important!(info, "使用规则引擎进行增强");
+            let rule_enhancer = RuleEnhancer::new_default();
+            let context = EnhanceContext {
+                current_file: None,
+                project_root: project_root_path.clone(),
+            };
+            let enhanced = rule_enhancer.enhance(prompt, &context);
+            return Ok(EnhanceResponse {
+                enhanced_prompt: enhanced,
+                original_prompt: original_prompt.to_string(),
+                success: true,
+                error: None,
+                blob_count,
+                history_count,
+                history_load_error,
+                history_fallback_used,
+                project_root_path,
+                blob_source_root,
+                request_id: Some(request_id),
+            });
+        }
+
+        // 使用 ChatClient 调用 API（Ollama / OpenAI 兼容 / Gemini / Anthropic）
+        log_important!(
+            info,
+            "使用 ChatClient 进行增强: provider={:?}, model={}",
+            chat_client.provider,
+            chat_client.model
+        );
+
+        // 构建 Chat 消息
+        let messages = vec![
+            Message::system(ENHANCE_SYSTEM_PROMPT),
+            Message::user(prompt),
+        ];
+
+        match chat_client.chat_with_retry(&messages).await {
+            Ok(response_text) => {
+                // 提取增强后的提示词
+                let enhanced_prompt = Self::extract_enhanced_prompt(&response_text)
+                    .unwrap_or_else(|| {
+                        // 如果没有找到标签，尝试使用整个响应（可能是简化格式）
+                        response_text.trim().to_string()
+                    });
+
+                let success = !enhanced_prompt.is_empty();
+
+                Ok(EnhanceResponse {
+                    enhanced_prompt,
+                    original_prompt: original_prompt.to_string(),
+                    success,
+                    error: if success { None } else { Some("未能从响应中提取增强结果".to_string()) },
+                    blob_count,
+                    history_count,
+                    history_load_error,
+                    history_fallback_used,
+                    project_root_path,
+                    blob_source_root,
+                    request_id: Some(request_id),
+                })
+            }
+            Err(e) => {
+                let error_msg = format!("ChatClient 调用失败: {}", e);
+                log_important!(warn, "{}", error_msg);
+                Ok(EnhanceResponse {
+                    enhanced_prompt: String::new(),
+                    original_prompt: original_prompt.to_string(),
+                    success: false,
+                    error: Some(error_msg),
+                    blob_count,
+                    history_count,
+                    history_load_error,
+                    history_fallback_used,
+                    project_root_path,
+                    blob_source_root,
+                    request_id: Some(request_id),
+                })
+            }
+        }
+    }
+
     /// 流式增强（通过回调函数推送进度）
     pub async fn enhance_stream<F>(&self, request: EnhanceRequest, mut on_event: F) -> Result<EnhanceResponse>
     where
@@ -655,13 +844,92 @@ impl PromptEnhancer {
         let history_count = build.history_diag.loaded_count;
         let history_load_error = build.history_diag.load_error.clone();
         let history_fallback_used = build.history_diag.fallback_used;
-        let payload = build.payload;
-        // 中文注释：返回给前端的“原始提示词”优先使用传入的 original_prompt
+        // 中文注释：返回给前端的"原始提示词"优先使用传入的 original_prompt
         let response_original_prompt = request.original_prompt.clone()
             .unwrap_or_else(|| request.prompt.clone());
 
+        // 检查取消标志
+        if let Some(flag) = &cancel_flag {
+            if flag.load(Ordering::Relaxed) {
+                let cancel_msg = "已取消增强请求".to_string();
+                on_event(EnhanceStreamEvent::error(&request_id, &cancel_msg));
+                return Ok(EnhanceResponse {
+                    enhanced_prompt: String::new(),
+                    original_prompt: response_original_prompt.clone(),
+                    success: false,
+                    error: Some(cancel_msg),
+                    blob_count,
+                    history_count,
+                    history_load_error,
+                    history_fallback_used,
+                    project_root_path,
+                    blob_source_root,
+                    request_id: Some(request_id),
+                });
+            }
+        }
+
+        // 如果有 ChatClient 列表，使用 fallback 降级链（模拟流式事件）
+        if !self.chat_clients.is_empty() {
+            let mut last_error: Option<String> = None;
+            for (idx, chat_client) in self.chat_clients.iter().enumerate() {
+                log_important!(
+                    info,
+                    "enhance_stream fallback: 尝试候选 {}/{} — {:?}",
+                    idx + 1,
+                    self.chat_clients.len(),
+                    chat_client.provider
+                );
+                match self.enhance_stream_via_chat_client(
+                    chat_client,
+                    &request.prompt,
+                    &response_original_prompt,
+                    blob_count,
+                    history_count,
+                    history_load_error.clone(),
+                    history_fallback_used,
+                    project_root_path.clone(),
+                    blob_source_root.clone(),
+                    request_id.clone(),
+                    &mut on_event,
+                ).await {
+                    Ok(resp) if resp.success => return Ok(resp),
+                    Ok(resp) => {
+                        let err_msg = resp.error.unwrap_or_else(|| "未知错误".to_string());
+                        log_important!(warn, "enhance_stream fallback: {:?} 失败 — {}", chat_client.provider, err_msg);
+                        last_error = Some(err_msg);
+                    }
+                    Err(e) => {
+                        log_important!(warn, "enhance_stream fallback: {:?} 异常 — {}", chat_client.provider, e);
+                        last_error = Some(format!("{}", e));
+                    }
+                }
+            }
+            let final_err = format!(
+                "所有 {} 个候选均失败，最后错误: {}",
+                self.chat_clients.len(),
+                last_error.unwrap_or_default()
+            );
+            on_event(EnhanceStreamEvent::error(&request_id, &final_err));
+            return Ok(EnhanceResponse {
+                enhanced_prompt: String::new(),
+                original_prompt: response_original_prompt,
+                success: false,
+                error: Some(final_err),
+                blob_count,
+                history_count,
+                history_load_error,
+                history_fallback_used,
+                project_root_path,
+                blob_source_root,
+                request_id: Some(request_id),
+            });
+        }
+
+        // 回退到旧的 Augment API 流式路径
+        let payload = build.payload;
         let url = format!("{}/chat-stream", self.base_url);
-        log_important!(info, "发送流式增强请求: url={}", url);
+        log_important!(info, "发送流式增强请求（Augment API）: url={}", url);
 
         let response = self.client
             .post(&url)
@@ -823,6 +1091,125 @@ impl PromptEnhancer {
             request_id: Some(request_id),
         })
     }
+
+    /// 使用 ChatClient 进行流式增强（模拟流式事件）
+    async fn enhance_stream_via_chat_client<F>(
+        &self,
+        chat_client: &ChatClient,
+        prompt: &str,
+        original_prompt: &str,
+        blob_count: usize,
+        history_count: usize,
+        history_load_error: Option<String>,
+        history_fallback_used: bool,
+        project_root_path: Option<String>,
+        blob_source_root: Option<String>,
+        request_id: String,
+        on_event: &mut F,
+    ) -> Result<EnhanceResponse>
+    where
+        F: FnMut(EnhanceStreamEvent) + Send,
+    {
+        // 如果是规则引擎，使用本地规则增强（即时返回）
+        if chat_client.provider == ChatProvider::RuleEngine {
+            log_important!(info, "使用规则引擎进行流式增强（即时返回）");
+            let rule_enhancer = RuleEnhancer::new_default();
+            let context = EnhanceContext {
+                current_file: None,
+                project_root: project_root_path.clone(),
+            };
+            let enhanced = rule_enhancer.enhance(prompt, &context);
+
+            // 模拟流式事件
+            on_event(EnhanceStreamEvent::chunk(&request_id, &enhanced, &enhanced, 50));
+            on_event(EnhanceStreamEvent::complete(&request_id, &enhanced, &enhanced));
+
+            return Ok(EnhanceResponse {
+                enhanced_prompt: enhanced,
+                original_prompt: original_prompt.to_string(),
+                success: true,
+                error: None,
+                blob_count,
+                history_count,
+                history_load_error,
+                history_fallback_used,
+                project_root_path,
+                blob_source_root,
+                request_id: Some(request_id),
+            });
+        }
+
+        // 使用 ChatClient 调用 API（非流式，但模拟流式事件）
+        log_important!(
+            info,
+            "使用 ChatClient 进行流式增强: provider={:?}, model={}",
+            chat_client.provider,
+            chat_client.model
+        );
+
+        // 发送"开始"事件
+        on_event(EnhanceStreamEvent::chunk(&request_id, "", "", 10));
+
+        // 构建 Chat 消息
+        let messages = vec![
+            Message::system(ENHANCE_SYSTEM_PROMPT),
+            Message::user(prompt),
+        ];
+
+        match chat_client.chat_with_retry(&messages).await {
+            Ok(response_text) => {
+                // 模拟进度
+                on_event(EnhanceStreamEvent::chunk(&request_id, &response_text, &response_text, 80));
+
+                // 提取增强后的提示词
+                let enhanced_prompt = Self::extract_enhanced_prompt(&response_text)
+                    .unwrap_or_else(|| {
+                        // 如果没有找到标签，尝试使用整个响应
+                        response_text.trim().to_string()
+                    });
+
+                let success = !enhanced_prompt.is_empty();
+
+                if success {
+                    on_event(EnhanceStreamEvent::complete(&request_id, &enhanced_prompt, &response_text));
+                } else {
+                    on_event(EnhanceStreamEvent::error(&request_id, "未能从响应中提取增强结果"));
+                }
+
+                Ok(EnhanceResponse {
+                    enhanced_prompt,
+                    original_prompt: original_prompt.to_string(),
+                    success,
+                    error: if success { None } else { Some("未能从响应中提取增强结果".to_string()) },
+                    blob_count,
+                    history_count,
+                    history_load_error,
+                    history_fallback_used,
+                    project_root_path,
+                    blob_source_root,
+                    request_id: Some(request_id),
+                })
+            }
+            Err(e) => {
+                let error_msg = format!("ChatClient 调用失败: {}", e);
+                log_important!(warn, "{}", error_msg);
+                on_event(EnhanceStreamEvent::error(&request_id, &error_msg));
+                Ok(EnhanceResponse {
+                    enhanced_prompt: String::new(),
+                    original_prompt: original_prompt.to_string(),
+                    success: false,
+                    error: Some(error_msg),
+                    blob_count,
+                    history_count,
+                    history_load_error,
+                    history_fallback_used,
+                    project_root_path,
+                    blob_source_root,
+                    request_id: Some(request_id),
+                })
+            }
+        }
+    }
 }
 
 /// 规范化 URL
@@ -841,29 +1228,359 @@ fn normalize_base_url(input: &str) -> String {
 mod tests {
     use super::*;
 
+    // =========================================================================
+    // normalize_base_url — 正常路径
+    // =========================================================================
+
     #[test]
-    fn test_normalize_base_url() {
+    fn test_normalize_base_url_adds_https_prefix() {
         assert_eq!(normalize_base_url("example.com"), "https://example.com");
+    }
+
+    #[test]
+    fn test_normalize_base_url_preserves_http() {
         assert_eq!(normalize_base_url("http://example.com/"), "http://example.com");
+    }
+
+    #[test]
+    fn test_normalize_base_url_strips_trailing_slashes() {
         assert_eq!(normalize_base_url("https://example.com///"), "https://example.com");
     }
 
+    // normalize_base_url — 边界条件
     #[test]
-    fn test_enhance_with_empty_prompt() {
-        // 空 prompt 应返回错误
-        // 注意：实际测试需要 mock API 调用
-        // 这里仅作为测试骨架示例
-
-        // 验证空 prompt 会被规则引擎拒绝
-        assert!(true); // 占位测试
+    fn test_normalize_base_url_empty_string() {
+        // 空字符串经 trim 后仍为空，加前缀 "https://" 再去尾斜杠 → "https:"
+        assert_eq!(normalize_base_url(""), "https:");
     }
 
     #[test]
-    fn test_rule_engine_basic_matching() {
-        // 测试规则引擎基本匹配
-        // 注意：需要 mock 规则引擎
+    fn test_normalize_base_url_whitespace_only() {
+        // 纯空白经 trim 后为空，同上
+        assert_eq!(normalize_base_url("   "), "https:");
+    }
 
-        // 验证规则引擎基本功能
-        assert!(true); // 占位测试
+    #[test]
+    fn test_normalize_base_url_with_leading_trailing_spaces() {
+        assert_eq!(normalize_base_url("  http://api.example.com/  "), "http://api.example.com");
+    }
+
+    #[test]
+    fn test_normalize_base_url_with_port() {
+        assert_eq!(normalize_base_url("http://localhost:11434"), "http://localhost:11434");
+    }
+
+    #[test]
+    fn test_normalize_base_url_with_path() {
+        assert_eq!(normalize_base_url("https://api.example.com/v1"), "https://api.example.com/v1");
+    }
+
+    // =========================================================================
+    // extract_enhanced_prompt — 正常路径
+    // =========================================================================
+
+    #[test]
+    fn test_extract_enhanced_prompt_basic() {
+        let text = "Here is the result:\n<augment-enhanced-prompt>增强后的提示词</augment-enhanced-prompt>\nDone.";
+        let result = PromptEnhancer::extract_enhanced_prompt(text);
+        assert_eq!(result, Some("增强后的提示词".to_string()));
+    }
+
+    #[test]
+    fn test_extract_enhanced_prompt_multiline() {
+        let text = "<augment-enhanced-prompt>\n第一行\n第二行\n第三行\n</augment-enhanced-prompt>";
+        let result = PromptEnhancer::extract_enhanced_prompt(text);
+        assert_eq!(result, Some("第一行\n第二行\n第三行".to_string()));
+    }
+
+    #[test]
+    fn test_extract_enhanced_prompt_with_code_block() {
+        let text = "<augment-enhanced-prompt>请修复以下代码：\n```rust\nfn main() {}\n```</augment-enhanced-prompt>";
+        let result = PromptEnhancer::extract_enhanced_prompt(text);
+        assert!(result.is_some());
+        assert!(result.unwrap().contains("```rust"));
+    }
+
+    // extract_enhanced_prompt — 边界条件
+    #[test]
+    fn test_extract_enhanced_prompt_empty_tags() {
+        let text = "<augment-enhanced-prompt></augment-enhanced-prompt>";
+        let result = PromptEnhancer::extract_enhanced_prompt(text);
+        // 空标签内容 trim 后为空字符串
+        assert_eq!(result, Some("".to_string()));
+    }
+
+    #[test]
+    fn test_extract_enhanced_prompt_whitespace_only_content() {
+        let text = "<augment-enhanced-prompt>   \n  \n   </augment-enhanced-prompt>";
+        let result = PromptEnhancer::extract_enhanced_prompt(text);
+        assert_eq!(result, Some("".to_string()));
+    }
+
+    // extract_enhanced_prompt — 异常路径
+    #[test]
+    fn test_extract_enhanced_prompt_no_tags() {
+        let result = PromptEnhancer::extract_enhanced_prompt("这是普通文本，没有标签");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_extract_enhanced_prompt_incomplete_open_tag() {
+        let result = PromptEnhancer::extract_enhanced_prompt("<augment-enhanced-prompt>没有关闭标签");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_extract_enhanced_prompt_empty_input() {
+        let result = PromptEnhancer::extract_enhanced_prompt("");
+        assert!(result.is_none());
+    }
+
+    // =========================================================================
+    // parse_sse_json_line — 正常路径
+    // =========================================================================
+
+    #[test]
+    fn test_parse_sse_json_line_with_data_prefix() {
+        let line = r#"data: {"text": "hello"}"#;
+        let result = PromptEnhancer::parse_sse_json_line(line);
+        assert!(result.is_some());
+        let json = result.unwrap();
+        assert_eq!(json["text"].as_str(), Some("hello"));
+    }
+
+    #[test]
+    fn test_parse_sse_json_line_without_prefix() {
+        let line = r#"{"text": "world"}"#;
+        let result = PromptEnhancer::parse_sse_json_line(line);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap()["text"].as_str(), Some("world"));
+    }
+
+    // parse_sse_json_line — 边界条件
+    #[test]
+    fn test_parse_sse_json_line_empty() {
+        assert!(PromptEnhancer::parse_sse_json_line("").is_none());
+    }
+
+    #[test]
+    fn test_parse_sse_json_line_whitespace_only() {
+        assert!(PromptEnhancer::parse_sse_json_line("   ").is_none());
+    }
+
+    #[test]
+    fn test_parse_sse_json_line_data_prefix_only() {
+        // "data:" 后面没有有效 JSON
+        assert!(PromptEnhancer::parse_sse_json_line("data:").is_none());
+    }
+
+    // parse_sse_json_line — 异常路径
+    #[test]
+    fn test_parse_sse_json_line_invalid_json() {
+        assert!(PromptEnhancer::parse_sse_json_line("data: {invalid}").is_none());
+    }
+
+    #[test]
+    fn test_parse_sse_json_line_non_json_text() {
+        assert!(PromptEnhancer::parse_sse_json_line("data: hello world").is_none());
+    }
+
+    // =========================================================================
+    // drain_sse_lines — 正常路径
+    // =========================================================================
+
+    #[test]
+    fn test_drain_sse_lines_single_complete_line() {
+        let mut buffer = String::new();
+        let mut lines = Vec::new();
+        PromptEnhancer::drain_sse_lines(&mut buffer, "line1\n", |l| lines.push(l.to_string()));
+        assert_eq!(lines, vec!["line1"]);
+        assert_eq!(buffer, "");
+    }
+
+    #[test]
+    fn test_drain_sse_lines_multiple_lines() {
+        let mut buffer = String::new();
+        let mut lines = Vec::new();
+        PromptEnhancer::drain_sse_lines(&mut buffer, "a\nb\nc\n", |l| lines.push(l.to_string()));
+        assert_eq!(lines, vec!["a", "b", "c"]);
+        assert_eq!(buffer, "");
+    }
+
+    #[test]
+    fn test_drain_sse_lines_cross_chunk() {
+        // 模拟跨分片场景：第一个 chunk 以不完整行结尾
+        let mut buffer = String::new();
+        let mut lines = Vec::new();
+
+        PromptEnhancer::drain_sse_lines(&mut buffer, "hel", |l| lines.push(l.to_string()));
+        assert!(lines.is_empty());
+        assert_eq!(buffer, "hel");
+
+        PromptEnhancer::drain_sse_lines(&mut buffer, "lo\nworld\n", |l| lines.push(l.to_string()));
+        assert_eq!(lines, vec!["hello", "world"]);
+        assert_eq!(buffer, "");
+    }
+
+    // drain_sse_lines — 边界条件
+    #[test]
+    fn test_drain_sse_lines_empty_chunk() {
+        let mut buffer = String::new();
+        let mut lines = Vec::new();
+        PromptEnhancer::drain_sse_lines(&mut buffer, "", |l| lines.push(l.to_string()));
+        assert!(lines.is_empty());
+        assert_eq!(buffer, "");
+    }
+
+    #[test]
+    fn test_drain_sse_lines_crlf_handling() {
+        let mut buffer = String::new();
+        let mut lines = Vec::new();
+        PromptEnhancer::drain_sse_lines(&mut buffer, "line1\r\nline2\r\n", |l| lines.push(l.to_string()));
+        assert_eq!(lines, vec!["line1", "line2"]);
+    }
+
+    #[test]
+    fn test_drain_sse_lines_no_trailing_newline() {
+        let mut buffer = String::new();
+        let mut lines = Vec::new();
+        PromptEnhancer::drain_sse_lines(&mut buffer, "complete\nincomplete", |l| lines.push(l.to_string()));
+        assert_eq!(lines, vec!["complete"]);
+        assert_eq!(buffer, "incomplete");
+    }
+
+    // =========================================================================
+    // clean_path_prefix_and_slashes — 正常路径
+    // =========================================================================
+
+    #[test]
+    fn test_clean_path_unix_style() {
+        let result = PromptEnhancer::clean_path_prefix_and_slashes("/home/user/project");
+        assert_eq!(result, "/home/user/project");
+    }
+
+    #[test]
+    fn test_clean_path_windows_backslash() {
+        let result = PromptEnhancer::clean_path_prefix_and_slashes("C:\\Users\\test\\project");
+        assert_eq!(result, "C:/Users/test/project");
+    }
+
+    #[test]
+    fn test_clean_path_windows_extended_prefix() {
+        let result = PromptEnhancer::clean_path_prefix_and_slashes("\\\\?\\C:\\Users\\test");
+        assert_eq!(result, "C:/Users/test");
+    }
+
+    #[test]
+    fn test_clean_path_windows_unc_prefix() {
+        let result = PromptEnhancer::clean_path_prefix_and_slashes("\\\\?\\UNC\\server\\share\\path");
+        assert_eq!(result, "//server/share/path");
+    }
+
+    // clean_path_prefix_and_slashes — 边界条件
+    #[test]
+    fn test_clean_path_trailing_slash_removed() {
+        let result = PromptEnhancer::clean_path_prefix_and_slashes("/home/user/project/");
+        assert_eq!(result, "/home/user/project");
+    }
+
+    #[test]
+    fn test_clean_path_empty_string() {
+        let result = PromptEnhancer::clean_path_prefix_and_slashes("");
+        assert_eq!(result, "");
+    }
+
+    #[test]
+    fn test_clean_path_whitespace_trimmed() {
+        let result = PromptEnhancer::clean_path_prefix_and_slashes("  /home/user  ");
+        assert_eq!(result, "/home/user");
+    }
+
+    #[test]
+    fn test_clean_path_forward_slash_unc() {
+        let result = PromptEnhancer::clean_path_prefix_and_slashes("//?/UNC/server/share/path");
+        assert_eq!(result, "//server/share/path");
+    }
+
+    #[test]
+    fn test_clean_path_forward_slash_extended() {
+        let result = PromptEnhancer::clean_path_prefix_and_slashes("//?/C:/Users/test");
+        assert_eq!(result, "C:/Users/test");
+    }
+
+    // =========================================================================
+    // truncate_text — 正常路径
+    // =========================================================================
+
+    #[test]
+    fn test_truncate_text_short_text() {
+        let result = PromptEnhancer::truncate_text("短文本", 100);
+        assert_eq!(result, "短文本");
+    }
+
+    #[test]
+    fn test_truncate_text_exact_limit() {
+        let result = PromptEnhancer::truncate_text("abc", 3);
+        assert_eq!(result, "abc");
+    }
+
+    #[test]
+    fn test_truncate_text_exceeds_limit() {
+        let result = PromptEnhancer::truncate_text("abcdefghij", 5);
+        assert_eq!(result, "abcde...");
+    }
+
+    // truncate_text — 边界条件
+    #[test]
+    fn test_truncate_text_empty() {
+        let result = PromptEnhancer::truncate_text("", 10);
+        assert_eq!(result, "");
+    }
+
+    #[test]
+    fn test_truncate_text_newlines_replaced() {
+        let result = PromptEnhancer::truncate_text("line1\nline2\r\nline3", 100);
+        assert_eq!(result, "line1 line2  line3");
+    }
+
+    #[test]
+    fn test_truncate_text_chinese_chars() {
+        // 中文字符按 char 计数，不按字节
+        let result = PromptEnhancer::truncate_text("你好世界测试文本", 4);
+        assert_eq!(result, "你好世界...");
+    }
+
+    #[test]
+    fn test_truncate_text_zero_limit() {
+        let result = PromptEnhancer::truncate_text("abc", 0);
+        assert_eq!(result, "...");
+    }
+
+    // =========================================================================
+    // 规则引擎集成（通过 core 调用）
+    // =========================================================================
+
+    #[test]
+    fn test_rule_engine_via_core_fix_keyword() {
+        let enhancer = RuleEnhancer::new_default();
+        let context = EnhanceContext {
+            current_file: None,
+            project_root: None,
+        };
+        let result = enhancer.enhance("fix the login bug", &context);
+        // 规则引擎应追加诊断步骤
+        assert!(result.len() > "fix the login bug".len());
+    }
+
+    #[test]
+    fn test_rule_engine_via_core_no_match() {
+        let enhancer = RuleEnhancer::new_default();
+        let context = EnhanceContext {
+            current_file: None,
+            project_root: None,
+        };
+        let result = enhancer.enhance("hello world", &context);
+        // 无匹配规则时返回原文
+        assert_eq!(result, "hello world");
     }
 }

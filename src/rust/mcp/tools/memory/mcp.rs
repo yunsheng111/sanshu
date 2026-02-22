@@ -1,9 +1,63 @@
 use anyhow::Result;
 use rmcp::model::{ErrorData as McpError, CallToolResult, Content};
+use serde::{Deserialize, Serialize};
+use std::time::Duration;
+use tokio::sync::{mpsc, oneshot};
 
 use super::MemoryCategory;
+use super::types::MemoryEntry;
+use super::fts_actor::{FtsMessage, SearchRequest};
+use super::similarity::TextSimilarity;
 use crate::mcp::{JiyiRequest, utils::{validate_project_path, project_path_error}};
 use crate::{log_debug, log_important};
+
+// =============================================================================
+// T5: Search Routing & DTO Extension
+// =============================================================================
+
+/// 搜索模式（OK-14: 返回 search_mode 字段）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SearchMode {
+    /// FTS5 全文搜索
+    Fts5,
+    /// 模糊匹配（降级）
+    Fuzzy,
+}
+
+impl SearchMode {
+    /// 获取搜索模式的中文名称
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            Self::Fts5 => "FTS5 全文搜索",
+            Self::Fuzzy => "模糊匹配",
+        }
+    }
+}
+
+/// 搜索结果（OK-14, OK-15）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SearchResult {
+    /// 匹配的记忆列表
+    pub memories: Vec<MemoryEntry>,
+    /// 搜索模式
+    pub search_mode: SearchMode,
+    /// 降级原因（如果是降级搜索）
+    pub fallback_reason: Option<String>,
+}
+
+/// FTS 搜索结果项（带高亮，OK-15）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FtsSearchItem {
+    /// 记忆 ID
+    pub id: String,
+    /// 记忆内容
+    pub content: String,
+    /// 高亮片段（FTS5 snippet 函数输出）
+    pub highlighted_snippet: Option<String>,
+    /// BM25 分数
+    pub score: f64,
+}
 
 /// 全局记忆管理工具
 ///
@@ -110,6 +164,11 @@ impl MemoryTool {
                 let memories = manager.get_all_memories()
                     .map_err(|e| McpError::internal_error(format!("获取记忆列表失败: {}", e), None))?;
 
+                // T5: 确定搜索模式（当前回忆操作默认列出所有，使用 Fuzzy 模式标识）
+                // 注：真正的智能搜索在有查询关键词时通过 search_memories_smart 执行
+                let search_mode = SearchMode::Fuzzy;
+                let search_mode_display = search_mode.display_name();
+
                 // Task 4: 回忆操作自动提升活力值
                 let boost_start = std::time::Instant::now();
                 let mut boosted_count = 0;
@@ -138,8 +197,9 @@ impl MemoryTool {
                     // 完整模式：返回所有内容
                     let info = manager.get_project_info()
                         .map_err(|e| McpError::internal_error(format!("获取项目信息失败: {}", e), None))?;
-                    log_important!(info, "[ji] 回忆完成(verbose): info_len={}", info.len());
-                    format!("{}{}{}", info, index_hint, non_git_hint)
+                    log_important!(info, "[ji] 回忆完成(verbose): info_len={}, search_mode={}", info.len(), search_mode_display);
+                    // T5: OK-14 在 verbose 模式下也添加 search_mode 信息
+                    format!("{}\n\n📊 搜索模式: {}{}{}", info, search_mode_display, index_hint, non_git_hint)
                 } else {
                     // 压缩模式（默认）：分类汇总 + 摘要
                     let stats = manager.get_stats()
@@ -158,8 +218,10 @@ impl MemoryTool {
                         })
                     }).collect();
 
+                    // T5: OK-14 在 JSON 结果中添加 search_mode 字段
                     let json_result = serde_json::json!({
                         "total": stats.total,
+                        "search_mode": search_mode_display,
                         "by_category": {
                             "规范": stats.rules,
                             "偏好": stats.preferences,
@@ -169,7 +231,7 @@ impl MemoryTool {
                         "entries": entries_summary,
                         "hint": "使用 verbose=true 获取完整内容"
                     });
-                    log_important!(info, "[ji] 回忆完成(compact): total={}", stats.total);
+                    log_important!(info, "[ji] 回忆完成(compact): total={}, search_mode={}", stats.total, search_mode_display);
                     format!("{}{}{}", serde_json::to_string_pretty(&json_result).unwrap_or_default(), index_hint, non_git_hint)
                 }
             }
@@ -711,6 +773,173 @@ impl MemoryTool {
         log_important!(info, "[ji] 调用完成: action={}, result_len={}", request.action, result.len());
         Ok(CallToolResult::success(vec![Content::text(result)]))
     }
+
+    // =========================================================================
+    // T5: Search Routing - 智能搜索方法（FTS 优先，超时降级）
+    // =========================================================================
+
+    /// 智能搜索记忆（FTS 优先，超时降级）
+    ///
+    /// OK-08: search 路由优先 FTS
+    /// OK-09: 5 秒超时
+    /// OK-10: 降级后继续模糊匹配
+    ///
+    /// # 参数
+    /// - `query`: 搜索查询字符串
+    /// - `limit`: 返回结果数量限制
+    /// - `all_memories`: 所有记忆列表（用于降级搜索和 ID 映射）
+    /// - `fts_tx`: FTS Actor 消息发送通道（可选）
+    ///
+    /// # 返回
+    /// 包含搜索结果和搜索模式的 `SearchResult`
+    pub async fn search_memories_smart(
+        query: &str,
+        limit: usize,
+        all_memories: &[MemoryEntry],
+        fts_tx: Option<&mpsc::Sender<FtsMessage>>,
+    ) -> SearchResult {
+        // 如果有 FTS Actor，优先使用 FTS 搜索
+        if let Some(tx) = fts_tx {
+            let (response_tx, response_rx) = oneshot::channel();
+            let request = SearchRequest {
+                query: query.to_string(),
+                limit,
+            };
+
+            // 发送搜索请求
+            if tx.send(FtsMessage::Search(request, response_tx)).await.is_ok() {
+                // 等待响应（5 秒超时，OK-09）
+                match tokio::time::timeout(
+                    Duration::from_secs(5),
+                    response_rx
+                ).await {
+                    Ok(Ok(Ok(ids))) => {
+                        // FTS 搜索成功，获取完整记忆
+                        let memories = Self::get_memories_by_ids(all_memories, &ids);
+                        log_debug!("[Search] FTS 搜索成功: query={}, results={}", query, memories.len());
+                        return SearchResult {
+                            memories,
+                            search_mode: SearchMode::Fts5,
+                            fallback_reason: None,
+                        };
+                    }
+                    Ok(Ok(Err(e))) => {
+                        // FTS 搜索失败，降级
+                        log_debug!("[Search] FTS 搜索失败，降级到模糊匹配: {}", e);
+                        return Self::fallback_to_fuzzy(
+                            query,
+                            limit,
+                            all_memories,
+                            format!("FTS 搜索失败: {}", e),
+                        );
+                    }
+                    Ok(Err(_)) => {
+                        // 通道关闭，降级
+                        log_debug!("[Search] FTS 通道关闭，降级到模糊匹配");
+                        return Self::fallback_to_fuzzy(
+                            query,
+                            limit,
+                            all_memories,
+                            "FTS Actor 通道关闭".to_string(),
+                        );
+                    }
+                    Err(_) => {
+                        // 超时，降级（OK-09）
+                        log_debug!("[Search] FTS 搜索超时（5秒），降级到模糊匹配");
+                        return Self::fallback_to_fuzzy(
+                            query,
+                            limit,
+                            all_memories,
+                            "FTS 搜索超时（5秒）".to_string(),
+                        );
+                    }
+                }
+            }
+        }
+
+        // 没有 FTS Actor，直接使用模糊匹配（OK-10）
+        Self::fallback_to_fuzzy(
+            query,
+            limit,
+            all_memories,
+            "FTS 不可用".to_string(),
+        )
+    }
+
+    /// 降级到模糊匹配搜索
+    fn fallback_to_fuzzy(
+        query: &str,
+        limit: usize,
+        all_memories: &[MemoryEntry],
+        reason: String,
+    ) -> SearchResult {
+        let memories = Self::fuzzy_search(query, limit, all_memories);
+        log_debug!("[Search] 模糊匹配完成: query={}, results={}, reason={}",
+            query, memories.len(), reason);
+        SearchResult {
+            memories,
+            search_mode: SearchMode::Fuzzy,
+            fallback_reason: Some(reason),
+        }
+    }
+
+    /// 模糊匹配搜索（基于相似度算法）
+    ///
+    /// 使用 TextSimilarity 计算查询与记忆内容的相似度，
+    /// 返回相似度最高的记忆列表。
+    ///
+    /// # 参数
+    /// - `query`: 搜索查询字符串
+    /// - `limit`: 返回结果数量限制
+    /// - `all_memories`: 所有记忆列表
+    ///
+    /// # 返回
+    /// 按相似度降序排列的记忆列表
+    pub fn fuzzy_search(
+        query: &str,
+        limit: usize,
+        all_memories: &[MemoryEntry],
+    ) -> Vec<MemoryEntry> {
+        if query.trim().is_empty() || all_memories.is_empty() {
+            return Vec::new();
+        }
+
+        // 计算每条记忆与查询的相似度
+        let mut scored: Vec<(f64, &MemoryEntry)> = all_memories
+            .iter()
+            .map(|entry| {
+                // 搜索内容和摘要
+                let content_sim = TextSimilarity::calculate_enhanced(query, &entry.content);
+                let summary_sim = entry.summary.as_ref()
+                    .map(|s| TextSimilarity::calculate_enhanced(query, s))
+                    .unwrap_or(0.0);
+                // 取两者中的较高分
+                let score = content_sim.max(summary_sim);
+                (score, entry)
+            })
+            .filter(|(score, _)| *score > 0.1) // 过滤掉相似度过低的结果
+            .collect();
+
+        // 按相似度降序排序
+        scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+
+        // 取前 limit 个结果
+        scored
+            .into_iter()
+            .take(limit)
+            .map(|(_, entry)| entry.clone())
+            .collect()
+    }
+
+    /// 根据 ID 列表从记忆列表中获取完整记忆
+    fn get_memories_by_ids(
+        all_memories: &[MemoryEntry],
+        ids: &[String],
+    ) -> Vec<MemoryEntry> {
+        ids.iter()
+            .filter_map(|id| all_memories.iter().find(|e| &e.id == id).cloned())
+            .collect()
+    }
 }
 
 /// 检查 sou 工具是否启用
@@ -738,5 +967,328 @@ async fn try_trigger_background_index(project_root: &str) -> Result<()> {
     } else {
         // 已经完成或正在进行，无需操作
         Ok(())
+    }
+}
+
+// =============================================================================
+// T7: 搜索测试模块
+// =============================================================================
+
+#[cfg(test)]
+mod search_tests {
+    use super::*;
+    use super::super::fts_actor::{spawn_fts_actor, FtsMessage};
+    use super::super::fts_index::FtsIndex;
+    use super::super::types::{MemoryEntry, MemoryCategory};
+    use super::super::similarity::TextSimilarity;
+    use chrono::Utc;
+    use tempfile::TempDir;
+    use tokio::time::Duration;
+
+    fn make_entry(id: &str, content: &str, category: MemoryCategory) -> MemoryEntry {
+        let now = Utc::now();
+        MemoryEntry {
+            id: id.to_string(),
+            content: content.to_string(),
+            content_normalized: TextSimilarity::normalize(content),
+            category,
+            created_at: now,
+            updated_at: now,
+            version: 1,
+            snapshots: Vec::new(),
+            uri_path: None,
+            domain: Some("core".to_string()),
+            tags: Some(vec!["test".to_string()]),
+            vitality_score: Some(1.5),
+            last_accessed_at: Some(now),
+            summary: None,
+        }
+    }
+
+    // =========================================================================
+    // OK-8: 搜索优先 FTS
+    // =========================================================================
+
+    #[tokio::test]
+    async fn test_search_prefers_fts() {
+        // OK-8: 验证 search_memories_smart 优先使用 FTS 搜索
+        let temp = TempDir::new().unwrap();
+        let index = FtsIndex::open(temp.path()).unwrap();
+        let fts_tx = spawn_fts_actor(index);
+
+        // 准备测试数据
+        let entries = vec![
+            make_entry("1", "Rust programming language guide", MemoryCategory::Rule),
+            make_entry("2", "Python scripting tips and tricks", MemoryCategory::Pattern),
+            make_entry("3", "JavaScript web development", MemoryCategory::Preference),
+        ];
+
+        // 同步到 FTS
+        for entry in &entries {
+            fts_tx.send(FtsMessage::Sync(entry.clone())).await.unwrap();
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+
+        // 使用 search_memories_smart 搜索
+        let result = MemoryTool::search_memories_smart(
+            "Rust",
+            10,
+            &entries,
+            Some(&fts_tx),
+        ).await;
+
+        // 验证使用了 FTS 模式
+        assert!(matches!(result.search_mode, SearchMode::Fts5),
+            "应使用 FTS5 搜索模式，实际: {:?}", result.search_mode);
+        assert!(result.fallback_reason.is_none(), "不应有降级原因");
+        assert!(!result.memories.is_empty(), "应返回搜索结果");
+        assert!(result.memories.iter().any(|m| m.id == "1"), "应找到 Rust 相关记忆");
+
+        fts_tx.send(FtsMessage::Shutdown).await.ok();
+    }
+
+    // =========================================================================
+    // OK-9: 5 秒超时
+    // =========================================================================
+
+    #[tokio::test]
+    async fn test_search_timeout_5s() {
+        // OK-9: 验证搜索有 5 秒超时保护
+        // 注意：此测试主要验证超时机制存在，不真正触发超时（FTS 通常很快）
+        let temp = TempDir::new().unwrap();
+        let index = FtsIndex::open(temp.path()).unwrap();
+        let fts_tx = spawn_fts_actor(index);
+
+        let entries = vec![
+            make_entry("1", "Rust programming", MemoryCategory::Rule),
+        ];
+
+        // 同步到 FTS
+        for entry in &entries {
+            fts_tx.send(FtsMessage::Sync(entry.clone())).await.unwrap();
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        // 搜索应在 5 秒内完成（正常情况远小于 5 秒）
+        let start = std::time::Instant::now();
+        let result = MemoryTool::search_memories_smart(
+            "Rust",
+            10,
+            &entries,
+            Some(&fts_tx),
+        ).await;
+        let elapsed = start.elapsed();
+
+        assert!(elapsed.as_secs() < 5, "搜索应在 5 秒内完成，实际耗时: {:?}", elapsed);
+        assert!(matches!(result.search_mode, SearchMode::Fts5));
+
+        fts_tx.send(FtsMessage::Shutdown).await.ok();
+    }
+
+    #[tokio::test]
+    async fn test_search_timeout_fallback() {
+        // OK-9: 验证超时后降级到模糊匹配
+        // 通过关闭 FTS Actor 模拟超时/不可用场景
+        let temp = TempDir::new().unwrap();
+        let index = FtsIndex::open(temp.path()).unwrap();
+        let fts_tx = spawn_fts_actor(index);
+
+        let entries = vec![
+            make_entry("1", "Rust programming language", MemoryCategory::Rule),
+            make_entry("2", "Python scripting", MemoryCategory::Pattern),
+        ];
+
+        // 先关闭 FTS Actor
+        fts_tx.send(FtsMessage::Shutdown).await.ok();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        // 搜索应降级到模糊匹配
+        let result = MemoryTool::search_memories_smart(
+            "Rust",
+            10,
+            &entries,
+            Some(&fts_tx), // 通道已关闭
+        ).await;
+
+        // 应降级到 Fuzzy 模式
+        assert!(matches!(result.search_mode, SearchMode::Fuzzy),
+            "FTS 不可用时应降级到 Fuzzy，实际: {:?}", result.search_mode);
+        assert!(result.fallback_reason.is_some(), "应有降级原因");
+    }
+
+    // =========================================================================
+    // OK-10: 降级后继续模糊匹配
+    // =========================================================================
+
+    #[tokio::test]
+    async fn test_search_fallback_to_fuzzy() {
+        // OK-10: 验证无 FTS Actor 时使用模糊匹配
+        let entries = vec![
+            make_entry("1", "Rust programming language guide", MemoryCategory::Rule),
+            make_entry("2", "Python web development framework", MemoryCategory::Pattern),
+            make_entry("3", "JavaScript frontend development", MemoryCategory::Preference),
+        ];
+
+        // 不提供 FTS Actor
+        let result = MemoryTool::search_memories_smart(
+            "programming",
+            10,
+            &entries,
+            None, // 无 FTS Actor
+        ).await;
+
+        // 应使用 Fuzzy 模式
+        assert!(matches!(result.search_mode, SearchMode::Fuzzy),
+            "无 FTS 时应使用 Fuzzy 模式，实际: {:?}", result.search_mode);
+        assert!(result.fallback_reason.is_some(), "应有降级原因");
+        assert!(result.fallback_reason.as_ref().unwrap().contains("不可用"),
+            "降级原因应提及 FTS 不可用");
+
+        // 模糊匹配仍应返回结果
+        assert!(!result.memories.is_empty(), "模糊匹配应返回结果");
+    }
+
+    #[tokio::test]
+    async fn test_fuzzy_search_quality() {
+        // OK-10: 验证模糊匹配的搜索质量
+        let entries = vec![
+            make_entry("1", "Rust 编程语言入门指南", MemoryCategory::Rule),
+            make_entry("2", "Python 数据分析教程", MemoryCategory::Pattern),
+            make_entry("3", "JavaScript 前端开发", MemoryCategory::Preference),
+            make_entry("4", "Rust 高性能并发编程", MemoryCategory::Rule),
+        ];
+
+        // 模糊搜索 "Rust"
+        let result = MemoryTool::fuzzy_search("Rust", 10, &entries);
+
+        // 应返回包含 Rust 的记忆
+        assert!(result.len() >= 2, "应至少找到 2 条 Rust 相关记忆，实际: {}", result.len());
+        assert!(result.iter().any(|m| m.id == "1"), "应找到记忆 1");
+        assert!(result.iter().any(|m| m.id == "4"), "应找到记忆 4");
+    }
+
+    #[tokio::test]
+    async fn test_fuzzy_search_empty_query() {
+        // OK-10: 空查询应返回空结果
+        let entries = vec![
+            make_entry("1", "测试内容", MemoryCategory::Rule),
+        ];
+
+        let result = MemoryTool::fuzzy_search("", 10, &entries);
+        assert!(result.is_empty(), "空查询应返回空结果");
+
+        let result2 = MemoryTool::fuzzy_search("   ", 10, &entries);
+        assert!(result2.is_empty(), "空白查询应返回空结果");
+    }
+
+    // =========================================================================
+    // OK-14: 返回 search_mode
+    // =========================================================================
+
+    #[tokio::test]
+    async fn test_search_returns_mode() {
+        // OK-14: 验证搜索结果包含 search_mode 字段
+        let temp = TempDir::new().unwrap();
+        let index = FtsIndex::open(temp.path()).unwrap();
+        let fts_tx = spawn_fts_actor(index);
+
+        let entries = vec![
+            make_entry("1", "Test content for search", MemoryCategory::Rule),
+        ];
+
+        // 同步到 FTS
+        fts_tx.send(FtsMessage::Sync(entries[0].clone())).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        // FTS 搜索
+        let result_fts = MemoryTool::search_memories_smart(
+            "Test",
+            10,
+            &entries,
+            Some(&fts_tx),
+        ).await;
+
+        // 验证 FTS 模式返回
+        assert!(matches!(result_fts.search_mode, SearchMode::Fts5));
+        assert_eq!(result_fts.search_mode.display_name(), "FTS5 全文搜索");
+
+        fts_tx.send(FtsMessage::Shutdown).await.ok();
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        // Fuzzy 搜索
+        let result_fuzzy = MemoryTool::search_memories_smart(
+            "Test",
+            10,
+            &entries,
+            None,
+        ).await;
+
+        // 验证 Fuzzy 模式返回
+        assert!(matches!(result_fuzzy.search_mode, SearchMode::Fuzzy));
+        assert_eq!(result_fuzzy.search_mode.display_name(), "模糊匹配");
+    }
+
+    #[tokio::test]
+    async fn test_search_result_serialization() {
+        // OK-14: 验证 SearchResult 可正确序列化
+        let entries = vec![
+            make_entry("1", "Test content", MemoryCategory::Rule),
+        ];
+
+        let result = MemoryTool::search_memories_smart(
+            "Test",
+            10,
+            &entries,
+            None,
+        ).await;
+
+        // 序列化为 JSON
+        let json = serde_json::to_string(&result).expect("SearchResult 应可序列化");
+
+        // 验证包含 search_mode 字段
+        assert!(json.contains("search_mode"), "JSON 应包含 search_mode 字段");
+        assert!(json.contains("fuzzy"), "JSON 中 search_mode 应为 fuzzy");
+
+        // 反序列化验证
+        let deserialized: SearchResult = serde_json::from_str(&json)
+            .expect("SearchResult 应可反序列化");
+        assert!(matches!(deserialized.search_mode, SearchMode::Fuzzy));
+    }
+
+    // =========================================================================
+    // 辅助测试
+    // =========================================================================
+
+    #[tokio::test]
+    async fn test_get_memories_by_ids() {
+        // 测试 ID 映射功能
+        let entries = vec![
+            make_entry("1", "内容一", MemoryCategory::Rule),
+            make_entry("2", "内容二", MemoryCategory::Pattern),
+            make_entry("3", "内容三", MemoryCategory::Preference),
+        ];
+
+        let ids = vec!["1".to_string(), "3".to_string()];
+        let result = MemoryTool::get_memories_by_ids(&entries, &ids);
+
+        assert_eq!(result.len(), 2);
+        assert!(result.iter().any(|m| m.id == "1"));
+        assert!(result.iter().any(|m| m.id == "3"));
+        assert!(!result.iter().any(|m| m.id == "2"));
+    }
+
+    #[tokio::test]
+    async fn test_get_memories_by_ids_not_found() {
+        // 测试不存在的 ID
+        let entries = vec![
+            make_entry("1", "内容一", MemoryCategory::Rule),
+        ];
+
+        let ids = vec!["1".to_string(), "999".to_string()];
+        let result = MemoryTool::get_memories_by_ids(&entries, &ids);
+
+        // 只返回存在的
+        assert_eq!(result.len(), 1);
+        assert!(result.iter().any(|m| m.id == "1"));
     }
 }

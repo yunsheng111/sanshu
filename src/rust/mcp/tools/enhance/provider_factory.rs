@@ -1,9 +1,13 @@
-// 提供者工厂：从 McpConfig 构建 ChatClient，实现三级降级链
-// L1: Ollama 本地 → L2: 云端 API（OpenAI/Gemini/Anthropic 等） → L3: 规则引擎
+// 提供者工厂：从 McpConfig 构建 ChatClient 候选列表，支持用户自定义渠道降级顺序
+// 默认顺序: L1 Ollama → L2 云端 API → L3 规则引擎
+// 用户可通过 enhance_channel_order 自定义，如 ["cloud","ollama","rule_engine"]
 
 use std::time::Duration;
 use crate::config::settings::McpConfig;
 use super::chat_client::{ChatClient, ChatProvider};
+
+/// 默认渠道顺序
+const DEFAULT_CHANNEL_ORDER: &[&str] = &["ollama", "cloud", "rule_engine"];
 
 /// 将 enhance_provider 字符串映射到 ChatProvider 枚举
 /// gemini → Gemini, anthropic → Anthropic
@@ -20,103 +24,120 @@ fn provider_from_str(s: &str) -> ChatProvider {
     }
 }
 
-/// 同步版本：从配置构建 ChatClient（不检测 Ollama 可用性）
-/// 适用于不需要异步的场景，按 L1→L2→L3 优先级选择
-pub fn build_enhance_client(config: &McpConfig) -> ChatClient {
-    // L1：Ollama 本地（同步版本不检测可用性，直接返回）
-    if let Some(ollama_url) = config.enhance_ollama_url.as_ref() {
-        if !ollama_url.is_empty() {
-            let model = config
-                .enhance_ollama_model
-                .clone()
-                .unwrap_or_else(|| "qwen2.5-coder:7b".to_string());
-            return ChatClient::new(
-                ChatProvider::Ollama,
-                ollama_url.clone(),
-                None,
-                model,
-            );
+/// 解析渠道顺序，过滤无效值，保证 rule_engine 兜底
+fn resolve_channel_order(config: &McpConfig) -> Vec<String> {
+    let valid = ["ollama", "cloud", "rule_engine"];
+    let order = match &config.enhance_channel_order {
+        Some(list) if !list.is_empty() => {
+            let mut filtered: Vec<String> = list.iter()
+                .map(|s| s.to_lowercase())
+                .filter(|s| valid.contains(&s.as_str()))
+                .collect();
+            // 去重
+            filtered.dedup();
+            // 保证 rule_engine 兜底
+            if !filtered.contains(&"rule_engine".to_string()) {
+                filtered.push("rule_engine".to_string());
+            }
+            filtered
         }
-    }
-
-    // L2：云端 API（根据 enhance_provider 选择格式）
-    if let (Some(base_url), Some(api_key)) = (
-        config.enhance_base_url.as_ref(),
-        config.enhance_api_key.as_ref(),
-    ) {
-        if !base_url.is_empty() && !api_key.is_empty() {
-            let provider = provider_from_str(
-                config.enhance_provider.as_deref().unwrap_or("openai_compat"),
-            );
-            let model = config
-                .enhance_model
-                .clone()
-                .unwrap_or_else(|| "Qwen/Qwen2.5-Coder-7B-Instruct".to_string());
-            return ChatClient::new(
-                provider,
-                base_url.clone(),
-                Some(api_key.clone()),
-                model,
-            );
-        }
-    }
-
-    // L3：规则引擎（无需 API）
-    ChatClient::new(
-        ChatProvider::RuleEngine,
-        String::new(),
-        None,
-        String::new(),
-    )
+        _ => DEFAULT_CHANNEL_ORDER.iter().map(|s| s.to_string()).collect(),
+    };
+    order
 }
 
-/// 异步版本：从配置构建 ChatClient，L1 会检测 Ollama 可用性
-pub async fn build_enhance_client_async(config: &McpConfig) -> ChatClient {
-    // L1：Ollama 本地（异步检测可用性）
-    if let Some(ollama_url) = config.enhance_ollama_url.as_ref() {
-        if !ollama_url.is_empty() && is_ollama_available(ollama_url).await {
-            let model = config
-                .enhance_ollama_model
-                .clone()
-                .unwrap_or_else(|| "qwen2.5-coder:7b".to_string());
-            return ChatClient::new(
-                ChatProvider::Ollama,
-                ollama_url.clone(),
-                None,
-                model,
-            );
+/// 尝试构建 Ollama ChatClient（不检测可用性）
+fn try_build_ollama(config: &McpConfig) -> Option<ChatClient> {
+    let ollama_url = config.enhance_ollama_url.as_ref()?;
+    if ollama_url.is_empty() {
+        return None;
+    }
+    let model = config.enhance_ollama_model.clone()
+        .unwrap_or_else(|| "qwen2.5-coder:7b".to_string());
+    Some(ChatClient::new(ChatProvider::Ollama, ollama_url.clone(), None, model))
+}
+
+/// 尝试构建云端 API ChatClient
+fn try_build_cloud(config: &McpConfig) -> Option<ChatClient> {
+    let base_url = config.enhance_base_url.as_ref()?;
+    let api_key = config.enhance_api_key.as_ref()?;
+    if base_url.is_empty() || api_key.is_empty() {
+        return None;
+    }
+    let provider = provider_from_str(
+        config.enhance_provider.as_deref().unwrap_or("openai_compat"),
+    );
+    let model = config.enhance_model.clone()
+        .unwrap_or_else(|| "Qwen/Qwen2.5-Coder-7B-Instruct".to_string());
+    Some(ChatClient::new(provider, base_url.clone(), Some(api_key.clone()), model))
+}
+
+/// 构建规则引擎 ChatClient（始终可用）
+fn build_rule_engine() -> ChatClient {
+    ChatClient::new(ChatProvider::RuleEngine, String::new(), None, String::new())
+}
+
+/// 按渠道顺序构建候选 ChatClient 列表（同步版本，不检测 Ollama 可用性）
+pub fn build_enhance_candidates(config: &McpConfig) -> Vec<ChatClient> {
+    let order = resolve_channel_order(config);
+    let mut candidates = Vec::new();
+    for channel in &order {
+        match channel.as_str() {
+            "ollama" => {
+                if let Some(client) = try_build_ollama(config) {
+                    candidates.push(client);
+                }
+            }
+            "cloud" => {
+                if let Some(client) = try_build_cloud(config) {
+                    candidates.push(client);
+                }
+            }
+            "rule_engine" => {
+                candidates.push(build_rule_engine());
+            }
+            _ => {} // 无效值已在 resolve_channel_order 中过滤
         }
     }
+    // 安全兜底：如果候选列表为空（理论上不会），加入规则引擎
+    if candidates.is_empty() {
+        candidates.push(build_rule_engine());
+    }
+    candidates
+}
 
-    // L2：云端 API（根据 enhance_provider 选择格式）
-    if let (Some(base_url), Some(api_key)) = (
-        config.enhance_base_url.as_ref(),
-        config.enhance_api_key.as_ref(),
-    ) {
-        if !base_url.is_empty() && !api_key.is_empty() {
-            let provider = provider_from_str(
-                config.enhance_provider.as_deref().unwrap_or("openai_compat"),
-            );
-            let model = config
-                .enhance_model
-                .clone()
-                .unwrap_or_else(|| "Qwen/Qwen2.5-Coder-7B-Instruct".to_string());
-            return ChatClient::new(
-                provider,
-                base_url.clone(),
-                Some(api_key.clone()),
-                model,
-            );
+/// 按渠道顺序构建候选 ChatClient 列表（异步版本，检测 Ollama 可用性）
+pub async fn build_enhance_candidates_async(config: &McpConfig) -> Vec<ChatClient> {
+    let order = resolve_channel_order(config);
+    let mut candidates = Vec::new();
+    for channel in &order {
+        match channel.as_str() {
+            "ollama" => {
+                if let Some(ollama_url) = config.enhance_ollama_url.as_ref() {
+                    if !ollama_url.is_empty() && is_ollama_available(ollama_url).await {
+                        let model = config.enhance_ollama_model.clone()
+                            .unwrap_or_else(|| "qwen2.5-coder:7b".to_string());
+                        candidates.push(ChatClient::new(
+                            ChatProvider::Ollama, ollama_url.clone(), None, model,
+                        ));
+                    }
+                }
+            }
+            "cloud" => {
+                if let Some(client) = try_build_cloud(config) {
+                    candidates.push(client);
+                }
+            }
+            "rule_engine" => {
+                candidates.push(build_rule_engine());
+            }
+            _ => {}
         }
     }
-
-    // L3：规则引擎
-    ChatClient::new(
-        ChatProvider::RuleEngine,
-        String::new(),
-        None,
-        String::new(),
-    )
+    if candidates.is_empty() {
+        candidates.push(build_rule_engine());
+    }
+    candidates
 }
 
 /// 异步检测 Ollama 是否可用（超时 3s）
@@ -180,25 +201,34 @@ mod tests {
             enhance_model: None,
             enhance_ollama_url: None,
             enhance_ollama_model: None,
+            enhance_channel_order: None,
             sou_embedding_provider: None,
             sou_embedding_base_url: None,
             sou_embedding_api_key: None,
             sou_embedding_model: None,
             sou_mode: None,
             sou_index_path: None,
+            // 协调层配置（Step 9 新增）
+            retrieval_enable_coordination: None,
+            retrieval_force_local: None,
+            retrieval_local_weight: None,
+            retrieval_remote_weight: None,
+            retrieval_score_gap_threshold: None,
+            retrieval_coverage_threshold: None,
         }
     }
 
     // ─── 正常路径测试 ─────────────────────────────────────────────────────────
 
     #[test]
-    fn test_build_enhance_client_l1_ollama_selected() {
+    fn test_build_enhance_candidates_l1_ollama_selected() {
         // Arrange - 设置 Ollama URL，应选择 L1
         let mut config = make_empty_config();
         config.enhance_ollama_url = Some("http://localhost:11434".to_string());
 
         // Act
-        let client = build_enhance_client(&config);
+        let candidates = build_enhance_candidates(&config);
+        let client = candidates.first().unwrap();
 
         // Assert - 应选择 Ollama 提供者
         assert_eq!(client.provider, ChatProvider::Ollama);
@@ -207,14 +237,15 @@ mod tests {
     }
 
     #[test]
-    fn test_build_enhance_client_l1_uses_custom_model() {
+    fn test_build_enhance_candidates_l1_uses_custom_model() {
         // Arrange - 设置自定义 Ollama 模型
         let mut config = make_empty_config();
         config.enhance_ollama_url = Some("http://localhost:11434".to_string());
         config.enhance_ollama_model = Some("llama3:8b".to_string());
 
         // Act
-        let client = build_enhance_client(&config);
+        let candidates = build_enhance_candidates(&config);
+        let client = candidates.first().unwrap();
 
         // Assert
         assert_eq!(client.provider, ChatProvider::Ollama);
@@ -222,28 +253,30 @@ mod tests {
     }
 
     #[test]
-    fn test_build_enhance_client_l1_default_model() {
+    fn test_build_enhance_candidates_l1_default_model() {
         // Arrange - 未设置 Ollama 模型，应使用默认值
         let mut config = make_empty_config();
         config.enhance_ollama_url = Some("http://localhost:11434".to_string());
         config.enhance_ollama_model = None;
 
         // Act
-        let client = build_enhance_client(&config);
+        let candidates = build_enhance_candidates(&config);
+        let client = candidates.first().unwrap();
 
         // Assert - 默认模型为 qwen2.5-coder:7b
         assert_eq!(client.model, "qwen2.5-coder:7b");
     }
 
     #[test]
-    fn test_build_enhance_client_l2_openai_compat_selected() {
+    fn test_build_enhance_candidates_l2_openai_compat_selected() {
         // Arrange - 无 Ollama URL，设置 OpenAI 兼容配置，应选择 L2
         let mut config = make_empty_config();
         config.enhance_base_url = Some("https://api.siliconflow.cn/v1".to_string());
         config.enhance_api_key = Some("sk-test-key".to_string());
 
         // Act
-        let client = build_enhance_client(&config);
+        let candidates = build_enhance_candidates(&config);
+        let client = candidates.first().unwrap();
 
         // Assert
         assert_eq!(client.provider, ChatProvider::OpenAICompat);
@@ -252,7 +285,7 @@ mod tests {
     }
 
     #[test]
-    fn test_build_enhance_client_l2_uses_custom_model() {
+    fn test_build_enhance_candidates_l2_uses_custom_model() {
         // Arrange
         let mut config = make_empty_config();
         config.enhance_base_url = Some("https://api.groq.com/v1".to_string());
@@ -260,14 +293,15 @@ mod tests {
         config.enhance_model = Some("llama-3.1-70b-versatile".to_string());
 
         // Act
-        let client = build_enhance_client(&config);
+        let candidates = build_enhance_candidates(&config);
+        let client = candidates.first().unwrap();
 
         // Assert
         assert_eq!(client.model, "llama-3.1-70b-versatile");
     }
 
     #[test]
-    fn test_build_enhance_client_l2_default_model() {
+    fn test_build_enhance_candidates_l2_default_model() {
         // Arrange - 未设置 model，应使用默认值
         let mut config = make_empty_config();
         config.enhance_base_url = Some("https://api.siliconflow.cn/v1".to_string());
@@ -275,19 +309,21 @@ mod tests {
         config.enhance_model = None;
 
         // Act
-        let client = build_enhance_client(&config);
+        let candidates = build_enhance_candidates(&config);
+        let client = candidates.first().unwrap();
 
         // Assert - 默认模型
         assert_eq!(client.model, "Qwen/Qwen2.5-Coder-7B-Instruct");
     }
 
     #[test]
-    fn test_build_enhance_client_l3_rule_engine_fallback() {
+    fn test_build_enhance_candidates_l3_rule_engine_fallback() {
         // Arrange - 所有 API 配置均为 None，应降级到 L3
         let config = make_empty_config();
 
         // Act
-        let client = build_enhance_client(&config);
+        let candidates = build_enhance_candidates(&config);
+        let client = candidates.first().unwrap();
 
         // Assert
         assert_eq!(client.provider, ChatProvider::RuleEngine);
@@ -299,7 +335,7 @@ mod tests {
     // ─── 边界条件测试 ─────────────────────────────────────────────────────────
 
     #[test]
-    fn test_build_enhance_client_l1_empty_url_skips_to_l2() {
+    fn test_build_enhance_candidates_l1_empty_url_skips_to_l2() {
         // Arrange - Ollama URL 为空字符串，应跳过 L1 进入 L2
         let mut config = make_empty_config();
         config.enhance_ollama_url = Some("".to_string()); // 空字符串
@@ -307,42 +343,45 @@ mod tests {
         config.enhance_api_key = Some("sk-test".to_string());
 
         // Act
-        let client = build_enhance_client(&config);
+        let candidates = build_enhance_candidates(&config);
+        let client = candidates.first().unwrap();
 
         // Assert - 空 URL 应跳过 L1，选择 L2
         assert_eq!(client.provider, ChatProvider::OpenAICompat);
     }
 
     #[test]
-    fn test_build_enhance_client_l2_empty_api_key_skips_to_l3() {
+    fn test_build_enhance_candidates_l2_empty_api_key_skips_to_l3() {
         // Arrange - API key 为空字符串，应跳过 L2 进入 L3
         let mut config = make_empty_config();
         config.enhance_base_url = Some("https://api.siliconflow.cn/v1".to_string());
         config.enhance_api_key = Some("".to_string()); // 空字符串
 
         // Act
-        let client = build_enhance_client(&config);
+        let candidates = build_enhance_candidates(&config);
+        let client = candidates.first().unwrap();
 
         // Assert - 空 API key 应跳过 L2，降级到 L3
         assert_eq!(client.provider, ChatProvider::RuleEngine);
     }
 
     #[test]
-    fn test_build_enhance_client_l2_empty_base_url_skips_to_l3() {
+    fn test_build_enhance_candidates_l2_empty_base_url_skips_to_l3() {
         // Arrange - base_url 为空字符串，应跳过 L2 进入 L3
         let mut config = make_empty_config();
         config.enhance_base_url = Some("".to_string()); // 空字符串
         config.enhance_api_key = Some("sk-test".to_string());
 
         // Act
-        let client = build_enhance_client(&config);
+        let candidates = build_enhance_candidates(&config);
+        let client = candidates.first().unwrap();
 
         // Assert
         assert_eq!(client.provider, ChatProvider::RuleEngine);
     }
 
     #[test]
-    fn test_build_enhance_client_l1_priority_over_l2() {
+    fn test_build_enhance_candidates_l1_priority_over_l2() {
         // Arrange - 同时设置 Ollama 和 OpenAI 兼容配置，L1 应优先
         let mut config = make_empty_config();
         config.enhance_ollama_url = Some("http://localhost:11434".to_string());
@@ -350,7 +389,8 @@ mod tests {
         config.enhance_api_key = Some("sk-test".to_string());
 
         // Act
-        let client = build_enhance_client(&config);
+        let candidates = build_enhance_candidates(&config);
+        let client = candidates.first().unwrap();
 
         // Assert - L1 优先于 L2
         assert_eq!(client.provider, ChatProvider::Ollama);
@@ -359,35 +399,37 @@ mod tests {
     // ─── 异常路径测试 ─────────────────────────────────────────────────────────
 
     #[test]
-    fn test_build_enhance_client_l2_missing_api_key_falls_to_l3() {
+    fn test_build_enhance_candidates_l2_missing_api_key_falls_to_l3() {
         // Arrange - 有 base_url 但无 api_key（None），应降级到 L3
         let mut config = make_empty_config();
         config.enhance_base_url = Some("https://api.siliconflow.cn/v1".to_string());
         config.enhance_api_key = None; // 完全缺失
 
         // Act
-        let client = build_enhance_client(&config);
+        let candidates = build_enhance_candidates(&config);
+        let client = candidates.first().unwrap();
 
         // Assert
         assert_eq!(client.provider, ChatProvider::RuleEngine);
     }
 
     #[test]
-    fn test_build_enhance_client_l2_missing_base_url_falls_to_l3() {
+    fn test_build_enhance_candidates_l2_missing_base_url_falls_to_l3() {
         // Arrange - 有 api_key 但无 base_url（None），应降级到 L3
         let mut config = make_empty_config();
         config.enhance_base_url = None; // 完全缺失
         config.enhance_api_key = Some("sk-test".to_string());
 
         // Act
-        let client = build_enhance_client(&config);
+        let candidates = build_enhance_candidates(&config);
+        let client = candidates.first().unwrap();
 
         // Assert
         assert_eq!(client.provider, ChatProvider::RuleEngine);
     }
 
     #[tokio::test]
-    async fn test_build_enhance_client_async_l2_when_ollama_unreachable() {
+    async fn test_build_enhance_candidates_async_l2_when_ollama_unreachable() {
         // Arrange - Ollama URL 指向不可达地址，异步版本应跳过 L1 进入 L2
         let mut config = make_empty_config();
         config.enhance_ollama_url = Some("http://127.0.0.1:1".to_string()); // 不可达
@@ -395,20 +437,22 @@ mod tests {
         config.enhance_api_key = Some("sk-test".to_string());
 
         // Act - 异步版本会检测 Ollama 可用性，超时后跳过
-        let client = build_enhance_client_async(&config).await;
+        let candidates = build_enhance_candidates_async(&config).await;
+        let client = candidates.first().unwrap();
 
         // Assert - Ollama 不可达，应选择 L2
         assert_eq!(client.provider, ChatProvider::OpenAICompat);
     }
 
     #[tokio::test]
-    async fn test_build_enhance_client_async_l3_when_all_unavailable() {
+    async fn test_build_enhance_candidates_async_l3_when_all_unavailable() {
         // Arrange - Ollama 不可达，且无 OpenAI 配置
         let mut config = make_empty_config();
         config.enhance_ollama_url = Some("http://127.0.0.1:1".to_string()); // 不可达
 
         // Act
-        let client = build_enhance_client_async(&config).await;
+        let candidates = build_enhance_candidates_async(&config).await;
+        let client = candidates.first().unwrap();
 
         // Assert - 最终降级到 L3
         assert_eq!(client.provider, ChatProvider::RuleEngine);

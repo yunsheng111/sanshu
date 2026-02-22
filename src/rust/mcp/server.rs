@@ -468,7 +468,17 @@ pub async fn run_server() -> Result<(), Box<dyn std::error::Error>> {
                 ServerInitializeError::ConnectionClosed(_) => {
                     log_important!(
                         error,
-                        "启动服务器失败：初始化阶段连接已关闭。通常是未通过 MCP 客户端以 stdio 管道启动，或客户端启动后立即退出。请检查 MCP 客户端配置（command/args/stdio），不要直接双击运行。"
+                        "启动服务器失败：初始化阶段连接已关闭。\n\
+                         【诊断】\n\
+                         1. 未通过 MCP 客户端以 stdio 管道启动（不要直接双击运行）\n\
+                         2. 客户端启动后立即退出（检查客户端日志）\n\
+                         3. 客户端配置错误（检查 command/args/stdio 配置）\n\
+                         4. 权限问题（检查可执行文件权限）\n\
+                         【解决方案】\n\
+                         - Claude Desktop: 检查 ~/.config/Claude/claude_desktop_config.json\n\
+                         - Cursor: 检查 ~/.cursor/mcp.json\n\
+                         - 确保配置中 command 指向正确的可执行文件路径\n\
+                         - 确保 args 为空数组或不包含错误参数"
                     );
                 }
                 _ => {

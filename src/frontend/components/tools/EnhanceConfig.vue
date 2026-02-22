@@ -23,6 +23,7 @@ const config = ref({
   base_url: '',
   api_key: '',
   model: '',
+  channel_order: null as string[] | null,
 })
 
 const loadingConfig = ref(false)
@@ -64,6 +65,44 @@ const isOllamaProvider = computed(() => config.value.provider === 'ollama')
 const isRuleEngine = computed(() => config.value.provider === 'rule_engine')
 const isCloudProvider = computed(() => !isOllamaProvider.value && !isRuleEngine.value)
 
+// 降级链通道选项
+const CHANNEL_OPTIONS = [
+  { label: 'Ollama 本地', value: 'ollama' },
+  { label: '云端 API', value: 'cloud' },
+  { label: '规则引擎', value: 'rule_engine' },
+]
+
+// 默认降级链顺序
+const DEFAULT_CHANNEL_ORDER = ['ollama', 'cloud', 'rule_engine']
+
+// 获取当前降级链顺序（使用默认值或用户配置）
+const effectiveChannelOrder = computed(() => {
+  return config.value.channel_order ?? DEFAULT_CHANNEL_ORDER
+})
+
+// 更新降级链顺序
+function updateChannelOrder(newOrder: string[]) {
+  // 如果与默认顺序相同，设为 null（使用默认）
+  const isDefault = newOrder.length === DEFAULT_CHANNEL_ORDER.length
+    && newOrder.every((v, i) => v === DEFAULT_CHANNEL_ORDER[i])
+  config.value.channel_order = isDefault ? null : newOrder
+}
+
+// 移动通道顺序
+function moveChannel(index: number, direction: 'up' | 'down') {
+  const order = [...effectiveChannelOrder.value]
+  const targetIndex = direction === 'up' ? index - 1 : index + 1
+  if (targetIndex < 0 || targetIndex >= order.length)
+    return
+  ;[order[index], order[targetIndex]] = [order[targetIndex], order[index]]
+  updateChannelOrder(order)
+}
+
+// 重置为默认顺序
+function resetChannelOrder() {
+  config.value.channel_order = null
+}
+
 function onProviderChange(val: string) {
   const defaults = PROVIDER_DEFAULTS[val]
   if (!defaults)
@@ -88,6 +127,7 @@ async function loadConfig() {
       base_url: res.base_url || '',
       api_key: res.api_key || '',
       model: res.model || '',
+      channel_order: res.channel_order || null,
     }
   }
   catch (err) {
@@ -109,6 +149,7 @@ async function saveConfig() {
         base_url: config.value.base_url,
         api_key: config.value.api_key,
         model: config.value.model,
+        channel_order: config.value.channel_order,
       },
     })
     message.success('配置已保存')
@@ -317,6 +358,66 @@ onMounted(() => {
           </n-form-item>
         </ConfigSection>
 
+        <!-- 降级链顺序配置 -->
+        <ConfigSection title="降级链顺序" description="配置增强请求失败时的降级顺序（从上到下依次尝试）">
+          <n-alert type="info" :bordered="false" class="mb-3">
+            <template #icon>
+              <div class="i-carbon-information" />
+            </template>
+            当某个通道失败时，系统会自动尝试下一个通道。默认顺序：Ollama → 云端 API → 规则引擎
+          </n-alert>
+
+          <div class="channel-order-list">
+            <div
+              v-for="(channel, index) in effectiveChannelOrder"
+              :key="channel"
+              class="channel-item"
+            >
+              <div class="channel-info">
+                <div class="channel-index">{{ index + 1 }}</div>
+                <div class="channel-label">
+                  {{ CHANNEL_OPTIONS.find(opt => opt.value === channel)?.label ?? channel }}
+                </div>
+              </div>
+              <div class="channel-actions">
+                <n-button
+                  size="tiny"
+                  quaternary
+                  :disabled="index === 0"
+                  @click="moveChannel(index, 'up')"
+                >
+                  <template #icon>
+                    <div class="i-carbon-chevron-up" />
+                  </template>
+                </n-button>
+                <n-button
+                  size="tiny"
+                  quaternary
+                  :disabled="index === effectiveChannelOrder.length - 1"
+                  @click="moveChannel(index, 'down')"
+                >
+                  <template #icon>
+                    <div class="i-carbon-chevron-down" />
+                  </template>
+                </n-button>
+              </div>
+            </div>
+          </div>
+
+          <div class="flex justify-end mt-3">
+            <n-button
+              size="small"
+              :disabled="!config.channel_order"
+              @click="resetChannelOrder"
+            >
+              <template #icon>
+                <div class="i-carbon-reset" />
+              </template>
+              恢复默认
+            </n-button>
+          </div>
+        </ConfigSection>
+
         <!-- 保存按钮 -->
         <div class="flex justify-end">
           <n-button
@@ -383,5 +484,55 @@ onMounted(() => {
 .form-feedback {
   font-size: 11px;
   color: var(--color-on-surface-muted, #9ca3af);
+}
+
+.channel-order-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.channel-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px;
+  background: var(--n-color);
+  border: 1px solid var(--n-border-color);
+  border-radius: 6px;
+  transition: all 0.2s;
+}
+
+.channel-item:hover {
+  border-color: var(--n-border-color-hover);
+}
+
+.channel-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.channel-index {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  background: var(--n-color-target);
+  border-radius: 50%;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--n-text-color);
+}
+
+.channel-label {
+  font-size: 14px;
+  color: var(--n-text-color);
+}
+
+.channel-actions {
+  display: flex;
+  gap: 4px;
 }
 </style>

@@ -55,8 +55,8 @@ impl ChatClient {
         model: String,
     ) -> Self {
         let (connect_ms, request_ms, stream_ms) = match provider {
-            ChatProvider::Ollama => (3_000, 60_000, 300_000),
-            ChatProvider::OpenAICompat | ChatProvider::Gemini | ChatProvider::Anthropic => (10_000, 30_000, 120_000),
+            ChatProvider::Ollama => (5_000, 90_000, 300_000),  // 连接超时 3s -> 5s，请求超时 60s -> 90s
+            ChatProvider::OpenAICompat | ChatProvider::Gemini | ChatProvider::Anthropic => (10_000, 45_000, 120_000),  // 请求超时 30s -> 45s
             ChatProvider::RuleEngine => (0, 0, 0),
         };
         Self {
@@ -245,7 +245,7 @@ impl ChatClient {
         Ok(content)
     }
 
-    /// 带简单重试的 chat（最多 2 次）
+    /// 带指数退避重试的 chat（最多 2 次，第 2 次等待 1s）
     pub async fn chat_with_retry(&self, messages: &[Message]) -> Result<String> {
         let mut last_err = None;
         for attempt in 0..2 {
@@ -253,7 +253,8 @@ impl ChatClient {
                 Ok(result) => return Ok(result),
                 Err(e) => {
                     if attempt == 0 {
-                        log::debug!("chat 第 1 次失败，重试: {}", e);
+                        log::warn!("chat 第 1 次失败，1 秒后重试: {}", e);
+                        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
                     }
                     last_err = Some(e);
                 }
@@ -324,9 +325,9 @@ mod tests {
             "qwen2.5-coder:7b".to_string(),
         );
 
-        // Assert - Ollama 超时配置：connect=3s, request=60s, stream=300s
-        assert_eq!(client.connect_timeout_ms, 3_000);
-        assert_eq!(client.request_timeout_ms, 60_000);
+        // Assert - Ollama 超时配置：connect=5s, request=90s, stream=300s
+        assert_eq!(client.connect_timeout_ms, 5_000);
+        assert_eq!(client.request_timeout_ms, 90_000);
         assert_eq!(client.stream_timeout_ms, 300_000);
         assert_eq!(client.provider, ChatProvider::Ollama);
     }
@@ -341,9 +342,9 @@ mod tests {
             "Qwen/Qwen2.5-Coder-7B-Instruct".to_string(),
         );
 
-        // Assert - OpenAICompat 超时配置：connect=10s, request=30s, stream=120s
+        // Assert - OpenAICompat 超时配置：connect=10s, request=45s, stream=120s
         assert_eq!(client.connect_timeout_ms, 10_000);
-        assert_eq!(client.request_timeout_ms, 30_000);
+        assert_eq!(client.request_timeout_ms, 45_000);
         assert_eq!(client.stream_timeout_ms, 120_000);
         assert_eq!(client.provider, ChatProvider::OpenAICompat);
     }
